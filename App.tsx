@@ -27,12 +27,12 @@ const STORAGE_KEYS = {
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'vault' | 'queue' | 'intents' | 'evolution' | 'chat' | 'import' | 'export' | 'settings'>('chat');
   
-  // 初始化加载
+  // Initialize and load from localStorage
   const [memories, setMemories] = useState<Memory[]>(() => JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMORIES) || '[]'));
   const [history, setHistory] = useState<EvolutionRecord[]>(() => JSON.parse(localStorage.getItem(STORAGE_KEYS.HISTORY) || '[]'));
   const [proposals, setProposals] = useState<InsightProposal[]>(() => {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEYS.PROPOSALS) || '[]');
-    // 确保旧数据有新的字段
+    // Ensure old data has new fields
     return saved.map((p: any) => ({
       ...p,
       confidence: p.confidence ?? 0.7,
@@ -59,7 +59,7 @@ const App: React.FC = () => {
     };
     if (saved) {
       const parsed = JSON.parse(saved);
-      // 合并默认值，确保新字段存在
+      // Merge with defaults to ensure new fields exist
       return { ...defaultSettings, ...parsed };
     }
     return defaultSettings;
@@ -69,7 +69,7 @@ const App: React.FC = () => {
   const [isExtractingInsights, setIsExtractingInsights] = useState(false);
   const [chatInput, setChatInput] = useState('');
 
-  // 自动保存逻辑
+  // Auto-save logic
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.MEMORIES, JSON.stringify(memories)); }, [memories]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history)); }, [history]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.PROPOSALS, JSON.stringify(proposals)); }, [proposals]);
@@ -126,17 +126,17 @@ const App: React.FC = () => {
     const validatedLayer = (rawLayer >= 0 && rawLayer <= 4) ? (rawLayer as MemoryLayer) : MemoryLayer.L1;
 
     setMemories(prev => {
-      // 使用智能相似度算法查找相似记忆
+      // Use intelligent similarity algorithm to find similar memories
       const similarMatches = findSimilarMemories(proposal, prev, 0.7);
       const existingSimilar = similarMatches.length > 0 ? similarMatches[0].memory : null;
 
       if (existingSimilar) {
-        // 改进的合并逻辑
+        // Improved merge logic
         const mergedEvidence = [...new Set([...existingSimilar.evidence, ...proposal.evidenceContext])].slice(-8);
         const evidenceCount = mergedEvidence.length;
         const mergedConfidence = calculateMergedConfidence(existingSimilar, proposal, evidenceCount);
         
-        // 选择更完整的内容（更长的那个，或置信度更高的那个）
+        // Choose better content (longer one, or one with higher confidence)
         const betterContent = proposal.confidence > existingSimilar.confidence 
           ? (proposal.proposedMemory.content || existingSimilar.content)
           : existingSimilar.content;
@@ -160,7 +160,7 @@ const App: React.FC = () => {
         
         return prev.map(m => m.id === existingSimilar.id ? updatedMemory : m);
       } else {
-        // 新记忆：使用提案的置信度，如果没有则使用默认值
+        // New memory: use proposal confidence, or default if not available
         const newMemory: Memory = {
           id: crypto.randomUUID(),
           content: proposal.proposedMemory.content || '',
@@ -197,15 +197,15 @@ const App: React.FC = () => {
     try {
       const insights = await extractInsightsFromChat(hist, settings);
       if (insights && insights.length > 0) {
-        // 预过滤机制
+        // Pre-filtering mechanism
         const filteredInsights = insights.filter((insight: any) => {
-          // 1. 置信度阈值过滤
+          // 1. Confidence threshold filtering
           const confidence = insight.confidence ?? 0.7;
           if (settings.qualityFilterEnabled && confidence < settings.minConfidenceThreshold) {
             return false;
           }
           
-          // 2. 质量评分过滤
+          // 2. Quality score filtering
           const qualityScore = calculateQualityScore({
             confidence,
             evidenceStrength: insight.evidenceStrength ?? 0.6,
@@ -215,7 +215,7 @@ const App: React.FC = () => {
             return false;
           }
           
-          // 3. 检查是否与现有记忆高度相似（自动合并）
+          // 3. Check if highly similar to existing memories (auto-merge)
           const similar = findSimilarMemories(
             {
               id: '',
@@ -234,7 +234,7 @@ const App: React.FC = () => {
           );
           
           if (similar.length > 0 && similar[0].similarity >= settings.autoMergeThreshold) {
-            // 自动合并逻辑
+            // Auto-merge logic
             const existingMemory = similar[0].memory;
             const mergedEvidence = [...new Set([...existingMemory.evidence, hist[hist.length-1].content])].slice(-8);
             const evidenceCount = mergedEvidence.length;
@@ -274,13 +274,13 @@ const App: React.FC = () => {
               type: 'CONSOLIDATION'
             }]);
             
-            return false;  // 不进入队列
+            return false;  // Don't add to queue
           }
           
           return true;
         });
         
-        // 创建提案，包含所有质量指标
+        // Create proposals with all quality metrics
         const props: InsightProposal[] = filteredInsights.map((i: any) => {
           const confidence = i.confidence ?? 0.7;
           const evidenceStrength = i.evidenceStrength ?? 0.6;
@@ -290,7 +290,7 @@ const App: React.FC = () => {
             qualityIndicators: i.qualityIndicators
           });
           
-          // 检查相似记忆（用于在UI中显示）
+          // Check for similar memories (for UI display)
           const similarMatches = findSimilarMemories(
             {
               id: '',
@@ -383,7 +383,7 @@ const App: React.FC = () => {
         )}
         {activeTab === 'import' && (
           <ImportHub onImport={(p) => {
-            // 为导入的提案检查相似记忆
+            // Check for similar memories for imported proposals
             const proposalsWithSimilarity = p.map(proposal => {
               const similarMatches = findSimilarMemories(proposal, memories, 0.7);
               return {

@@ -24,8 +24,8 @@ async function callDeepSeek(settings: AppSettings, messages: any[]) {
 }
 
 /**
- * 分析对话历史并提取认知洞察
- * 使用 Gemini 3 Pro 以处理复杂推理任务
+ * Analyze conversation history and extract cognitive insights
+ * Uses Gemini 3 Pro for complex reasoning tasks
  */
 export const extractInsightsFromChat = async (history: { role: string; content: string }[], settings: AppSettings) => {
   const prompt = `你是一位进化心理学与认知科学专家。请分析以下对话，提取具有"泛化性"的用户记忆碎片（Memo）。
@@ -122,7 +122,7 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
 };
 
 /**
- * 批量解析外部对话记录
+ * Batch parse external conversation records
  */
 export const parseImaConversationsBatch = async (text: string) => {
   const prompt = `你是一位进化心理学与认知科学专家。请分析以下批量导入的对话内容，提取具有"泛化性"的用户记忆碎片（Memo）。
@@ -194,8 +194,8 @@ ${text}`;
 };
 
 /**
- * 生成助理响应
- * 使用 Gemini 3 Flash 以提供低延迟回复
+ * Generate assistant response
+ * Uses Gemini 3 Flash for low-latency responses
  */
 export const generateAgentResponse = async (
   message: string, 

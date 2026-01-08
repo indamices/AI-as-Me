@@ -2,7 +2,7 @@
 import { Memory, InsightProposal, MemoryCategory } from './types';
 
 /**
- * 计算两个文本的 Jaccard 相似度
+ * Calculate Jaccard similarity between two texts
  */
 export function jaccardSimilarity(text1: string, text2: string): number {
   const words1 = new Set(text1.toLowerCase().split(/\s+/).filter(w => w.length > 0));
@@ -15,7 +15,7 @@ export function jaccardSimilarity(text1: string, text2: string): number {
 }
 
 /**
- * 计算编辑距离（Levenshtein距离）
+ * Calculate Levenshtein distance (edit distance)
  */
 function levenshteinDistance(str1: string, str2: string): number {
   const matrix: number[][] = [];
@@ -48,7 +48,7 @@ function levenshteinDistance(str1: string, str2: string): number {
 }
 
 /**
- * 计算基于编辑距离的相似度
+ * Calculate similarity based on Levenshtein distance
  */
 export function levenshteinSimilarity(text1: string, text2: string): number {
   const maxLen = Math.max(text1.length, text2.length);
@@ -58,7 +58,7 @@ export function levenshteinSimilarity(text1: string, text2: string): number {
 }
 
 /**
- * 计算余弦相似度（基于词频）
+ * Calculate cosine similarity (based on word frequency)
  */
 export function cosineSimilarity(text1: string, text2: string): number {
   const words1 = text1.toLowerCase().split(/\s+/).filter(w => w.length > 0);
@@ -88,7 +88,7 @@ export function cosineSimilarity(text1: string, text2: string): number {
 }
 
 /**
- * 计算文本相似度（综合多种方法）
+ * Calculate text similarity (combines multiple methods)
  */
 export function calculateSimilarity(
   text1: string,
@@ -102,7 +102,7 @@ export function calculateSimilarity(
   } else if (method === 'levenshtein') {
     return levenshteinSimilarity(text1, text2);
   } else {
-    // 综合方法：取多种算法的平均值
+    // Combined method: average of multiple algorithms
     const jaccard = jaccardSimilarity(text1, text2);
     const cosine = cosineSimilarity(text1, text2);
     const levenshtein = levenshteinSimilarity(text1, text2);
@@ -111,7 +111,7 @@ export function calculateSimilarity(
 }
 
 /**
- * 查找相似记忆
+ * Find similar memories
  */
 export function findSimilarMemories(
   proposal: InsightProposal,
@@ -124,38 +124,38 @@ export function findSimilarMemories(
 
   if (!proposalContent) return matches;
 
-  // 1. 先按分类过滤
+  // 1. Filter by category first
   const sameCategoryMemories = existingMemories.filter(
     m => m.status === 'ACTIVE' && 
     (proposalCategory ? m.category === proposalCategory : true)
   );
 
-  // 2. 计算语义相似度
+  // 2. Calculate semantic similarity
   for (const memory of sameCategoryMemories) {
     const similarity = calculateSimilarity(proposalContent, memory.content, 'combined');
     
     if (similarity >= threshold) {
       let reason = '';
       if (similarity >= 0.9) {
-        reason = '高度相似，可能是重复记忆';
+        reason = 'Highly similar, likely duplicate memory';
       } else if (similarity >= 0.8) {
-        reason = '非常相似，建议合并';
+        reason = 'Very similar, recommend merging';
       } else {
-        reason = '相似度较高，请检查是否需要合并';
+        reason = 'Moderately similar, check if merge needed';
       }
       
       matches.push({ memory, similarity, reason });
     }
   }
 
-  // 按相似度降序排序
+  // Sort by similarity descending
   matches.sort((a, b) => b.similarity - a.similarity);
   
   return matches;
 }
 
 /**
- * 计算质量评分
+ * Calculate quality score
  */
 export function calculateQualityScore(
   insight: {
@@ -179,28 +179,28 @@ export function calculateQualityScore(
     consistency = insight.qualityIndicators.consistency || 0.5;
   }
   
-  // 质量评分公式
+  // Quality score formula
   return (
-    confidence * 0.4 +           // AI置信度
-    evidenceStrength * 0.3 +      // 证据强度
-    generalization * 0.2 +        // 泛化性
-    consistency * 0.1            // 一致性
+    confidence * 0.4 +           // AI confidence
+    evidenceStrength * 0.3 +      // Evidence strength
+    generalization * 0.2 +        // Generalization
+    consistency * 0.1            // Consistency
   );
 }
 
 /**
- * 计算合并后的置信度
+ * Calculate merged confidence after memory consolidation
  */
 export function calculateMergedConfidence(
   existing: Memory,
   proposal: InsightProposal,
   evidenceCount: number
 ): number {
-  // 基于证据数量的动态调整
+  // Dynamic adjustment based on evidence count
   const evidenceWeight = Math.min(evidenceCount / 5, 1.0);
   const proposalWeight = (proposal.confidence || 0.8) * (proposal.evidenceStrength || 0.7);
   
-  // 加权平均，但偏向更高的置信度
+  // Weighted average, biased towards higher confidence
   return Math.min(1.0,
     existing.confidence * 0.6 +
     proposalWeight * 0.4 +

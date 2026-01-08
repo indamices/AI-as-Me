@@ -13,7 +13,7 @@ const ExportCenter: React.FC<ExportCenterProps> = ({ memories }) => {
 
   const activeMemories = memories.filter(m => m.status === 'ACTIVE');
 
-  // 生成系统提示词
+  // Generate system prompt
   const generatedPrompt = `你现在是我的个人数字孪生助理。基于我最新的记忆库，请在对话中遵循以下原则：
 ${activeMemories.map(m => `- [${m.category}] ${m.content}`).join('\n')}
 
@@ -22,7 +22,7 @@ ${activeMemories.map(m => `- [${m.category}] ${m.content}`).join('\n')}
 2. 对于人物关系，严格遵循已记录的条目。
 3. 若请求冲突，请礼貌指出并询问是否更新档案。`;
 
-  // 生成导出的文件内容 (Markdown 格式)
+  // Generate exported file content (Markdown format)
   const generateFileContent = () => {
     let content = `# 人格引擎个人记忆档案\n`;
     content += `生成时间: ${new Date().toLocaleString()}\n`;
@@ -43,7 +43,7 @@ ${activeMemories.map(m => `- [${m.category}] ${m.content}`).join('\n')}
 
   const handleGeneratePackage = () => {
     setIsExporting(true);
-    // 模拟构建过程
+    // Simulate build process
     setTimeout(() => {
       const timestamp = new Date().toISOString().split('T')[0];
       const filename = `PersonaMemory_${timestamp}_Snapshot.md`;

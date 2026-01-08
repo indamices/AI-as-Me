@@ -33,12 +33,12 @@ const MemoryVault: React.FC<MemoryVaultProps> = ({ memories, onUpdate, onDelete 
     }
   };
 
-  // 安全获取分类元数据
+  // Safely get category metadata
   const getCategoryMeta = (cat: MemoryCategory) => {
     return CATEGORY_METADATA[cat] || CATEGORY_METADATA[MemoryCategory.GOAL];
   };
 
-  // 安全获取层级元数据
+  // Safely get layer metadata
   const getLayerMeta = (layer: any) => {
     return LAYER_METADATA[layer] || { label: 'L?', stability: 'Unknown', description: 'Invalid data' };
   };

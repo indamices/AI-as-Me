@@ -65,7 +65,7 @@ const InsightQueue: React.FC<InsightQueueProps> = ({ proposals, onAccept, onReje
                      </div>
                   </div>
                   
-                  {/* 置信度可视化 */}
+                  {/* Confidence visualization */}
                   <div className="mt-4 space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-gray-500">置信度</span>
@@ -108,7 +108,7 @@ const InsightQueue: React.FC<InsightQueueProps> = ({ proposals, onAccept, onReje
                     </div>
                   </div>
                   
-                  {/* 相似记忆提示 */}
+                  {/* Similar memory warning */}
                   {proposal.similarityMatches && proposal.similarityMatches.length > 0 && (
                     <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4">
                       <p className="text-xs text-yellow-400 mb-2 flex items-center gap-2">

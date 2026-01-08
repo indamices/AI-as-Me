@@ -26,7 +26,7 @@ const ImportHub: React.FC<ImportHubProps> = ({ onImport }) => {
     if (!inputText.trim()) return;
     setIsSyncing(true);
     
-    // 模拟处理步骤
+    // Simulate processing steps
     for (let i = 0; i < steps.length; i++) {
       setSyncStep(i);
       await new Promise(r => setTimeout(r, 1000));
