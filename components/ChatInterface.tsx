@@ -2,11 +2,13 @@
 import React, { useRef, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Memory, ChatMode, AppSettings } from '../types';
+import { Memory, ChatMode, AppSettings, KnowledgeItem } from '../types';
 import { generateAgentResponse } from '../geminiService';
+import { retrieveRelevantKnowledge, formatKnowledgeContext } from '../knowledgeUtils';
 
 interface ChatInterfaceProps {
   memories: Memory[];
+  knowledgeItems?: KnowledgeItem[];
   messages: { role: 'user' | 'assistant'; content: string }[];
   setMessages: React.Dispatch<React.SetStateAction<{ role: 'user' | 'assistant'; content: string }[]>>;
   input: string;
@@ -19,7 +21,8 @@ interface ChatInterfaceProps {
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
-  memories, 
+  memories,
+  knowledgeItems = [],
   messages, 
   setMessages, 
   input, 
@@ -73,8 +76,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       .map(m => `[${m.category}] ${m.content}`)
       .join('\n');
 
+    // Retrieve relevant knowledge
+    const relevantKnowledge = retrieveRelevantKnowledge(messageToSend, knowledgeItems, 5);
+    const knowledgeContext = formatKnowledgeContext(relevantKnowledge);
+
     try {
-      const assistantResponse = await generateAgentResponse(messageToSend, newMessages, contextStr, mode, settings);
+      const assistantResponse = await generateAgentResponse(messageToSend, newMessages, contextStr, mode, settings, knowledgeContext);
       const finalMessages = [
         ...newMessages, 
         { role: 'assistant' as const, content: assistantResponse || "认知同步失败。" }

@@ -2,8 +2,8 @@
 import React from 'react';
 
 interface SidebarProps {
-  activeTab: 'vault' | 'queue' | 'intents' | 'evolution' | 'chat' | 'import' | 'export' | 'settings';
-  onTabChange: (tab: 'vault' | 'queue' | 'intents' | 'evolution' | 'chat' | 'import' | 'export' | 'settings') => void;
+  activeTab: 'vault' | 'queue' | 'intents' | 'evolution' | 'chat' | 'import' | 'export' | 'settings' | 'knowledge' | 'uploads' | 'sessions';
+  onTabChange: (tab: 'vault' | 'queue' | 'intents' | 'evolution' | 'chat' | 'import' | 'export' | 'settings' | 'knowledge' | 'uploads' | 'sessions') => void;
   pendingCount: number;
 }
 
@@ -13,6 +13,9 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, pendingCount 
     { id: 'import', label: '数据导入', icon: 'fa-file-import' },
     { id: 'queue', label: '治理队列', icon: 'fa-list-check', badge: pendingCount },
     { id: 'vault', label: '长期记忆库', icon: 'fa-brain' },
+    { id: 'knowledge', label: '知识库', icon: 'fa-book' },
+    { id: 'uploads', label: '上传历史', icon: 'fa-file-upload' },
+    { id: 'sessions', label: '会话存档', icon: 'fa-comments' },
     { id: 'intents', label: '核心意图', icon: 'fa-bullseye' },
     { id: 'evolution', label: '演进历史', icon: 'fa-timeline' },
     { id: 'export', label: '导出引擎', icon: 'fa-file-export' },

@@ -2,7 +2,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { 
   Memory, MemoryCategory, MemoryLayer, MemoryStatus, 
-  InsightProposal, EvolutionRecord, AppSettings, ChatMode 
+  InsightProposal, EvolutionRecord, AppSettings, ChatMode,
+  KnowledgeItem, UploadRecord, ConversationSession, ExtractionMode
 } from './types';
 import Sidebar from './components/Sidebar';
 import MemoryVault from './components/MemoryVault';
@@ -13,19 +14,55 @@ import ChatInterface from './components/ChatInterface';
 import ImportHub from './components/ImportHub';
 import ExportCenter from './components/ExportCenter';
 import SettingsCenter from './components/SettingsCenter';
-import { extractInsightsFromChat } from './geminiService';
+import KnowledgeBase from './components/KnowledgeBase';
+import UploadHistory from './components/UploadHistory';
+import SessionArchive from './components/SessionArchive';
+import { extractInsightsFromChat, extractKnowledgeFromText } from './geminiService';
 import { findSimilarMemories, calculateQualityScore, calculateMergedConfidence } from './memoryUtils';
+import { calculateContentHash, retrieveRelevantKnowledge, formatKnowledgeContext } from './knowledgeUtils';
+
+// Helper function to extract relevant evidence from conversation history
+const extractEvidenceContext = (
+  content: string,
+  history: { role: string; content: string }[],
+  maxSnippets: number = 3
+): string[] => {
+  if (history.length === 0) return [];
+  
+  // Extract keywords from the memory content (simple approach: use first few words)
+  const contentWords = content.toLowerCase().split(/\s+/).filter(w => w.length > 2).slice(0, 5);
+  
+  // Find messages that contain relevant keywords
+  const relevantMessages = history
+    .filter(msg => {
+      const msgLower = msg.content.toLowerCase();
+      return contentWords.some(word => msgLower.includes(word));
+    })
+    .slice(-maxSnippets)
+    .map(msg => msg.content);
+  
+  // If no relevant messages found, use recent messages
+  if (relevantMessages.length === 0) {
+    return history.slice(-maxSnippets).map(msg => msg.content);
+  }
+  
+  return relevantMessages;
+};
 
 const STORAGE_KEYS = {
   MEMORIES: 'pe_memories',
   HISTORY: 'pe_history',
   PROPOSALS: 'pe_proposals',
   SETTINGS: 'pe_settings',
-  MESSAGES: 'pe_messages'
+  MESSAGES: 'pe_messages',
+  KNOWLEDGE: 'pe_knowledge',
+  UPLOADS: 'pe_uploads',
+  SESSIONS: 'pe_sessions',
+  CONTENT_HASHES: 'pe_content_hashes'
 };
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'vault' | 'queue' | 'intents' | 'evolution' | 'chat' | 'import' | 'export' | 'settings'>('chat');
+  const [activeTab, setActiveTab] = useState<'vault' | 'queue' | 'intents' | 'evolution' | 'chat' | 'import' | 'export' | 'settings' | 'knowledge' | 'uploads' | 'sessions'>('chat');
   
   // Initialize and load from localStorage
   const [memories, setMemories] = useState<Memory[]>(() => JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMORIES) || '[]'));
@@ -50,6 +87,8 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
     const defaultSettings = {
+      geminiApiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || '',
+      geminiModel: 'gemini-3-pro-preview',
       deepseekKey: '',
       activeProvider: 'GEMINI' as const,
       deepseekModel: 'deepseek-chat',
@@ -68,6 +107,17 @@ const App: React.FC = () => {
   const [chatMode, setChatMode] = useState<ChatMode>('PROBE');
   const [isExtractingInsights, setIsExtractingInsights] = useState(false);
   const [chatInput, setChatInput] = useState('');
+  
+  // Knowledge Base state
+  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>(() => 
+    JSON.parse(localStorage.getItem(STORAGE_KEYS.KNOWLEDGE) || '[]')
+  );
+  const [uploadRecords, setUploadRecords] = useState<UploadRecord[]>(() => 
+    JSON.parse(localStorage.getItem(STORAGE_KEYS.UPLOADS) || '[]')
+  );
+  const [sessions, setSessions] = useState<ConversationSession[]>(() => 
+    JSON.parse(localStorage.getItem(STORAGE_KEYS.SESSIONS) || '[]')
+  );
 
   // Auto-save logic
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.MEMORIES, JSON.stringify(memories)); }, [memories]);
@@ -75,6 +125,9 @@ const App: React.FC = () => {
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.PROPOSALS, JSON.stringify(proposals)); }, [proposals]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings)); }, [settings]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(chatMessages)); }, [chatMessages]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.KNOWLEDGE, JSON.stringify(knowledgeItems)); }, [knowledgeItems]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.UPLOADS, JSON.stringify(uploadRecords)); }, [uploadRecords]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(sessions)); }, [sessions]);
 
   const handleClearAllData = useCallback(() => {
     localStorage.clear();
@@ -290,15 +343,18 @@ const App: React.FC = () => {
             qualityIndicators: i.qualityIndicators
           });
           
+          // Extract relevant evidence context for this specific insight
+          const evidenceContext = extractEvidenceContext(i.content || '', hist, 3);
+          
           // Check for similar memories (for UI display)
           const similarMatches = findSimilarMemories(
             {
               id: '',
               type: 'NEW',
               summary: i.content,
-              reasoning: i.reasoning,
+              reasoning: i.reasoning || 'No reasoning provided',
               proposedMemory: i,
-              evidenceContext: [hist[hist.length-1].content],
+              evidenceContext,
               status: 'PENDING',
               confidence,
               qualityScore,
@@ -312,8 +368,8 @@ const App: React.FC = () => {
             id: crypto.randomUUID(),
             type: similarMatches.length > 0 ? 'UPDATE' : 'NEW',
             summary: i.content,
-            reasoning: i.reasoning,
-            evidenceContext: [hist[hist.length-1].content],
+            reasoning: i.reasoning || 'No reasoning provided by AI',
+            evidenceContext,
             status: 'PENDING',
             proposedMemory: { ...i },
             confidence,
@@ -325,7 +381,7 @@ const App: React.FC = () => {
               reason: m.reason
             })),
             extractionMetadata: {
-              model: settings.activeProvider === 'GEMINI' ? 'gemini-3-pro-preview' : settings.deepseekModel,
+              model: settings.activeProvider === 'GEMINI' ? (settings.geminiModel || 'gemini-3-pro-preview') : settings.deepseekModel,
               timestamp: new Date().toISOString(),
               extractionMethod: 'CHAT'
             }
@@ -337,6 +393,20 @@ const App: React.FC = () => {
           const newUniqueProps = props.filter(p => !existingContents.has(p.summary));
           return [...newUniqueProps, ...prev];
         });
+        
+        // Save conversation session
+        if (hist.length > 2) { // Only save if there are actual exchanges
+          const sessionId = crypto.randomUUID();
+          const session: ConversationSession = {
+            id: sessionId,
+            title: hist.find(m => m.role === 'user')?.content.slice(0, 50) || '未命名会话',
+            messages: hist,
+            startedAt: new Date(Date.now() - hist.length * 60000).toISOString(), // Estimate start time
+            lastMessageAt: new Date().toISOString(),
+            extractedMemories: props.map(p => p.id)
+          };
+          setSessions(prev => [session, ...prev.slice(0, 99)]); // Keep last 100 sessions
+        }
       }
     } catch (e) {
       console.error("Harvesting failed:", e);
@@ -358,7 +428,8 @@ const App: React.FC = () => {
       <main className="flex-1 flex flex-col overflow-hidden min-h-0 relative">
         <div className={`flex-1 flex flex-col min-h-0 ${activeTab === 'chat' ? '' : 'hidden'}`}>
           <ChatInterface 
-            memories={memories} 
+            memories={memories}
+            knowledgeItems={knowledgeItems}
             messages={chatMessages}
             setMessages={setChatMessages}
             input={chatInput}
@@ -382,23 +453,74 @@ const App: React.FC = () => {
           />
         )}
         {activeTab === 'import' && (
-          <ImportHub onImport={(p) => {
-            // Check for similar memories for imported proposals
-            const proposalsWithSimilarity = p.map(proposal => {
-              const similarMatches = findSimilarMemories(proposal, memories, 0.7);
-              return {
-                ...proposal,
-                type: similarMatches.length > 0 ? 'UPDATE' : 'NEW' as const,
-                similarityMatches: similarMatches.map(m => ({
-                  memoryId: m.memory.id,
-                  similarity: m.similarity,
-                  reason: m.reason
-                }))
-              };
-            });
-            setProposals(prev => [...proposalsWithSimilarity, ...prev]);
-            setActiveTab('queue');
-          }} />
+          <ImportHub 
+            settings={settings}
+            existingHashes={new Set(uploadRecords.map(u => u.hash))}
+            onImport={(p) => {
+              // Check for similar memories for imported proposals
+              const proposalsWithSimilarity = p.map(proposal => {
+                const similarMatches = findSimilarMemories(proposal, memories, 0.7);
+                return {
+                  ...proposal,
+                  type: similarMatches.length > 0 ? 'UPDATE' : 'NEW' as const,
+                  similarityMatches: similarMatches.map(m => ({
+                    memoryId: m.memory.id,
+                    similarity: m.similarity,
+                    reason: m.reason
+                  }))
+                };
+              });
+              setProposals(prev => [...proposalsWithSimilarity, ...prev]);
+              setActiveTab('queue');
+            }}
+            onImportKnowledge={(knowledge) => {
+              setKnowledgeItems(prev => [...prev, ...knowledge]);
+            }}
+            onImportUpload={(upload) => {
+              setUploadRecords(prev => {
+                const existing = prev.find(u => u.id === upload.id);
+                if (existing) {
+                  return prev.map(u => u.id === upload.id ? upload : u);
+                }
+                return [...prev, upload];
+              });
+            }}
+          />
+        )}
+        {activeTab === 'knowledge' && (
+          <KnowledgeBase
+            knowledgeItems={knowledgeItems}
+            onUpdate={(id, updates) => {
+              setKnowledgeItems(prev => prev.map(k => k.id === id ? { ...k, ...updates, updatedAt: new Date().toISOString() } : k));
+            }}
+            onDelete={(id) => {
+              setKnowledgeItems(prev => prev.filter(k => k.id !== id));
+            }}
+            onArchive={(id) => {
+              setKnowledgeItems(prev => prev.map(k => k.id === id ? { ...k, status: 'ARCHIVED', updatedAt: new Date().toISOString() } : k));
+            }}
+          />
+        )}
+        {activeTab === 'uploads' && (
+          <UploadHistory
+            uploadRecords={uploadRecords}
+            onDelete={(id) => {
+              setUploadRecords(prev => prev.filter(u => u.id !== id));
+            }}
+          />
+        )}
+        {activeTab === 'sessions' && (
+          <SessionArchive
+            sessions={sessions}
+            onDelete={(id) => {
+              setSessions(prev => prev.filter(s => s.id !== id));
+            }}
+            onView={(session) => {
+              // View session in chat interface
+              setChatMessages(session.messages);
+              setActiveTab('chat');
+            }}
+          />
         )}
         {activeTab === 'intents' && (
           <IntentCenter onAddIntent={(memo) => {

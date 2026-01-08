@@ -99,12 +99,24 @@ const InsightQueue: React.FC<InsightQueueProps> = ({ proposals, onAccept, onReje
                 <div className="space-y-6">
                   <div>
                     <label className="block text-[10px] font-bold text-gray-600 uppercase mb-2 tracking-widest">推理逻辑</label>
-                    <p className="text-sm text-gray-400 italic leading-relaxed">"{proposal.reasoning}"</p>
+                    <p className="text-sm text-gray-400 italic leading-relaxed">
+                      {proposal.reasoning || 'No reasoning provided'}
+                    </p>
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-gray-600 uppercase mb-2 tracking-widest">证据摘要</label>
-                    <div className="bg-black/40 rounded-xl p-4 border border-dashed border-white/10">
-                       <p className="text-[11px] text-gray-500 font-mono">"...{proposal.evidenceContext[0]}..."</p>
+                    <div className="bg-black/40 rounded-xl p-4 border border-dashed border-white/10 max-h-32 overflow-y-auto">
+                      {proposal.evidenceContext && proposal.evidenceContext.length > 0 ? (
+                        <div className="space-y-2">
+                          {proposal.evidenceContext.slice(0, 3).map((evidence, idx) => (
+                            <p key={idx} className="text-[11px] text-gray-500 font-mono">
+                              {evidence.length > 100 ? `...${evidence.slice(-100)}` : evidence}
+                            </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-gray-600 font-mono italic">No evidence available</p>
+                      )}
                     </div>
                   </div>
                   

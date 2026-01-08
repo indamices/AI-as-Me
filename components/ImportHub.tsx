@@ -1,17 +1,30 @@
 
 import React, { useState, useRef } from 'react';
-import { parseImaConversationsBatch } from '../geminiService';
-import { InsightProposal } from '../types';
+import { parseImaConversationsBatch, extractKnowledgeFromText } from '../geminiService';
+import { InsightProposal, AppSettings, ExtractionMode, KnowledgeItem } from '../types';
 import { calculateQualityScore, findSimilarMemories } from '../memoryUtils';
+import { calculateContentHash } from '../knowledgeUtils';
 
 interface ImportHubProps {
   onImport: (proposals: InsightProposal[]) => void;
+  onImportKnowledge?: (knowledge: KnowledgeItem[]) => void;
+  onImportUpload?: (upload: any) => void;
+  settings?: AppSettings;
+  existingHashes?: Set<string>;
 }
 
-const ImportHub: React.FC<ImportHubProps> = ({ onImport }) => {
+const ImportHub: React.FC<ImportHubProps> = ({ 
+  onImport, 
+  onImportKnowledge,
+  onImportUpload,
+  settings,
+  existingHashes = new Set()
+}) => {
   const [inputText, setInputText] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStep, setSyncStep] = useState(0);
+  const [extractionMode, setExtractionMode] = useState<ExtractionMode>('MIXED');
+  const [uploadedFilename, setUploadedFilename] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const steps = [
@@ -23,57 +36,163 @@ const ImportHub: React.FC<ImportHubProps> = ({ onImport }) => {
   ];
 
   const handleProcessText = async () => {
-    if (!inputText.trim()) return;
+    if (!inputText.trim() || !settings) return;
     setIsSyncing(true);
     
+    // Check for duplicate content
+    const contentHash = await calculateContentHash(inputText);
+    if (existingHashes.has(contentHash)) {
+      alert('检测到重复内容，已跳过处理。');
+      setIsSyncing(false);
+      return;
+    }
+
+    // Create upload record
+    const uploadRecord = {
+      id: crypto.randomUUID(),
+      filename: uploadedFilename || '手动输入',
+      content: inputText,
+      hash: contentHash,
+      uploadedAt: new Date().toISOString(),
+      status: 'PENDING' as const,
+      extractedMemories: [] as string[],
+      extractedKnowledge: [] as string[]
+    };
+    if (onImportUpload) {
+      onImportUpload(uploadRecord);
+    }
+
     // Simulate processing steps
     for (let i = 0; i < steps.length; i++) {
       setSyncStep(i);
       await new Promise(r => setTimeout(r, 1000));
     }
 
-    const results = await parseImaConversationsBatch(inputText);
-    
-    const proposals: InsightProposal[] = results.map((r: any) => {
-      const confidence = r.confidence ?? 0.7;
-      const evidenceStrength = r.evidenceStrength ?? 0.6;
-      const qualityScore = calculateQualityScore({
-        confidence,
-        evidenceStrength,
-        qualityIndicators: r.qualityIndicators
-      });
-      
-      return {
-        id: crypto.randomUUID(),
-        type: 'NEW',
-        summary: r.content,
-        reasoning: r.reasoning,
-        evidenceContext: ["手动导入数据: " + inputText.slice(0, 50) + "..."],
-        status: 'PENDING',
-        proposedMemory: { ...r },
-        confidence,
-        qualityScore,
-        evidenceStrength,
-        extractionMetadata: {
-          model: 'gemini-3-pro-preview',
-          timestamp: new Date().toISOString(),
-          extractionMethod: 'BATCH_IMPORT'
-        }
-      };
-    });
+    try {
+      const proposals: InsightProposal[] = [];
+      const knowledgeItems: KnowledgeItem[] = [];
 
-    onImport(proposals);
-    setIsSyncing(false);
-    setInputText('');
+      // Extract based on mode
+      if (extractionMode === 'PERSONA' || extractionMode === 'MIXED') {
+        const results = await parseImaConversationsBatch(inputText, settings);
+        const newProposals = results.map((r: any) => {
+          const confidence = r.confidence ?? 0.7;
+          const evidenceStrength = r.evidenceStrength ?? 0.6;
+          const qualityScore = calculateQualityScore({
+            confidence,
+            evidenceStrength,
+            qualityIndicators: r.qualityIndicators
+          });
+          
+          const evidenceSnippets = inputText
+            .split('\n')
+            .filter(line => {
+              const contentLower = (r.content || '').toLowerCase();
+              const lineLower = line.toLowerCase();
+              return contentLower.split(/\s+/).some(word => 
+                word.length > 2 && lineLower.includes(word)
+              );
+            })
+            .slice(0, 3)
+            .map(line => line.trim())
+            .filter(line => line.length > 0);
+          
+          const evidenceContext = evidenceSnippets.length > 0 
+            ? evidenceSnippets 
+            : [inputText.slice(0, 100) + (inputText.length > 100 ? '...' : '')];
+          
+          return {
+            id: crypto.randomUUID(),
+            type: 'NEW' as const,
+            summary: r.content,
+            reasoning: r.reasoning || 'No reasoning provided by AI',
+            evidenceContext,
+            status: 'PENDING' as const,
+            proposedMemory: { ...r },
+            confidence,
+            qualityScore,
+            evidenceStrength,
+            extractionMetadata: {
+              model: settings?.geminiModel || 'gemini-3-pro-preview',
+              timestamp: new Date().toISOString(),
+              extractionMethod: 'BATCH_IMPORT' as const
+            }
+          };
+        });
+        proposals.push(...newProposals);
+      }
+
+      if (extractionMode === 'KNOWLEDGE' || extractionMode === 'MIXED') {
+        const knowledgeResults = await extractKnowledgeFromText(inputText, settings);
+        const newKnowledge = knowledgeResults.map((k: any) => ({
+          id: crypto.randomUUID(),
+          title: k.title,
+          content: k.content,
+          type: k.type,
+          tags: k.tags || [],
+          source: {
+            type: uploadedFilename ? 'UPLOAD' as const : 'MANUAL' as const,
+            filename: uploadedFilename || undefined,
+            uploadDate: new Date().toISOString()
+          },
+          hash: contentHash,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status: 'ACTIVE' as const
+        }));
+        knowledgeItems.push(...newKnowledge);
+      }
+
+      // Update upload record
+      if (onImportUpload) {
+        onImportUpload({
+          ...uploadRecord,
+          status: 'PROCESSED',
+          processedAt: new Date().toISOString(),
+          extractedMemories: proposals.map(p => p.id),
+          extractedKnowledge: knowledgeItems.map(k => k.id)
+        });
+      }
+
+      if (proposals.length > 0) {
+        onImport(proposals);
+      }
+      if (knowledgeItems.length > 0 && onImportKnowledge) {
+        onImportKnowledge(knowledgeItems);
+      }
+
+      setIsSyncing(false);
+      setInputText('');
+      setUploadedFilename('');
+    } catch (error) {
+      console.error('Extraction failed:', error);
+      if (onImportUpload) {
+        onImportUpload({
+          ...uploadRecord,
+          status: 'FAILED',
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+      setIsSyncing(false);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setUploadedFilename(file.name);
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const text = event.target?.result as string;
         setInputText(text);
+        
+        // Check for duplicate
+        const hash = await calculateContentHash(text);
+        if (existingHashes.has(hash)) {
+          alert('检测到重复文件，已跳过加载。');
+          setInputText('');
+          setUploadedFilename('');
+        }
       };
       reader.readAsText(file);
     }
@@ -113,6 +232,37 @@ const ImportHub: React.FC<ImportHubProps> = ({ onImport }) => {
             </div>
             <div className="relative flex justify-center text-xs uppercase">
               <span className="bg-[#050505] px-4 text-gray-600 font-bold tracking-widest">或者 直接粘贴文本</span>
+            </div>
+          </div>
+
+          {/* Extraction Mode Selection */}
+          <div className="glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl">
+            <div className="mb-6">
+              <label className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-3 block">
+                提取模式
+              </label>
+              <div className="grid grid-cols-3 gap-4">
+                {(['PERSONA', 'KNOWLEDGE', 'MIXED'] as ExtractionMode[]).map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => setExtractionMode(mode)}
+                    className={`p-4 rounded-xl border transition-all ${
+                      extractionMode === mode
+                        ? 'bg-blue-600/20 border-blue-500 text-blue-400'
+                        : 'bg-white/5 border-white/10 text-gray-500 hover:border-white/20'
+                    }`}
+                  >
+                    <div className="font-bold mb-1">
+                      {mode === 'PERSONA' ? '个人特质' : mode === 'KNOWLEDGE' ? '知识提取' : '混合模式'}
+                    </div>
+                    <div className="text-xs">
+                      {mode === 'PERSONA' ? '仅提取个人特质记忆' : 
+                       mode === 'KNOWLEDGE' ? '仅提取知识/上下文' : 
+                       '同时提取特质和知识'}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

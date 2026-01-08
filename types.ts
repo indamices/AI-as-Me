@@ -80,6 +80,8 @@ export type ChatMode = 'STANDARD' | 'PROBE';
 export type AIProvider = 'GEMINI' | 'DEEPSEEK';
 
 export interface AppSettings {
+  geminiApiKey: string;        // Gemini API Key
+  geminiModel: string;         // Gemini model selection
   deepseekKey: string;
   activeProvider: AIProvider;
   deepseekModel: string;
@@ -87,3 +89,65 @@ export interface AppSettings {
   autoMergeThreshold: number;  // 自动合并相似度阈值（0-1）
   qualityFilterEnabled: boolean;  // 是否启用质量过滤
 }
+
+// Knowledge Base Types
+export enum KnowledgeType {
+  DOCUMENT = 'DOCUMENT',      // 文档类（文章、笔记）
+  REFERENCE = 'REFERENCE',     // 参考资料
+  CONTEXT = 'CONTEXT',         // 上下文信息
+  FACT = 'FACT',              // 事实性知识
+  NOTE = 'NOTE'               // 笔记类
+}
+
+export interface KnowledgeItem {
+  id: string;
+  title: string;              // 标题/名称
+  content: string;            // 内容（可以是完整文本或摘要）
+  type: KnowledgeType;
+  tags: string[];            // 标签，便于分类检索
+  source: {
+    type: 'UPLOAD' | 'CHAT' | 'MANUAL';
+    filename?: string;        // 如果是上传的文件
+    uploadDate?: string;
+    chatSessionId?: string;  // 如果来自对话
+  };
+  hash: string;              // 内容哈希，用于去重
+  metadata?: {
+    fileSize?: number;
+    wordCount?: number;
+    language?: string;
+    extractedAt?: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+  status: 'ACTIVE' | 'ARCHIVED';
+}
+
+// Upload Record
+export interface UploadRecord {
+  id: string;
+  filename: string;
+  content: string;           // 原始内容
+  hash: string;              // SHA-256 hash
+  uploadedAt: string;
+  processedAt?: string;      // 处理时间
+  status: 'PENDING' | 'PROCESSED' | 'FAILED';
+  extractedMemories?: string[];  // 提取出的记忆 ID
+  extractedKnowledge?: string[]; // 提取出的知识 ID
+  error?: string;
+}
+
+// Conversation Session
+export interface ConversationSession {
+  id: string;
+  title: string;             // 会话标题（自动生成或手动）
+  messages: { role: 'user' | 'assistant'; content: string }[];
+  startedAt: string;
+  lastMessageAt: string;
+  harvestedAt?: string;      // 收割时间
+  extractedMemories?: string[];
+  extractedKnowledge?: string[];
+}
+
+// Extraction Mode
+export type ExtractionMode = 'PERSONA' | 'KNOWLEDGE' | 'MIXED';
