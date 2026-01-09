@@ -5,9 +5,39 @@ import { MemoryCategory, AppSettings, KnowledgeType } from './types';
 // The categories used for enum validation in responseSchema
 const CATEGORY_ENUM = ['GOAL', 'PREFERENCE', 'HABIT', 'BOUNDARY', 'VALUE', 'PROJECT', 'PEOPLE'];
 
+// Default timeout for API calls (30 seconds)
+const DEFAULT_API_TIMEOUT = 30000;
+
+/**
+ * Fetch with timeout wrapper
+ */
+async function fetchWithTimeout(
+  url: string, 
+  options: RequestInit, 
+  timeout: number = DEFAULT_API_TIMEOUT
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeout}ms`);
+    }
+    throw error;
+  }
+}
+
 // DeepSeek API implementation (OpenAI compatible)
 async function callDeepSeek(settings: AppSettings, messages: any[]) {
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
+  const response = await fetchWithTimeout("https://api.deepseek.com/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -19,8 +49,14 @@ async function callDeepSeek(settings: AppSettings, messages: any[]) {
       stream: false
     })
   });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error(`DeepSeek API error: ${JSON.stringify(error)}`);
+  }
+  
   const data = await response.json();
-  return data.choices[0].message.content;
+  return data.choices[0]?.message?.content || "";
 }
 
 /**
@@ -213,7 +249,7 @@ async function callDeepSeekForExtraction(settings: AppSettings, prompt: string):
     }
   ];
   
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
+  const response = await fetchWithTimeout("https://api.deepseek.com/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -226,7 +262,7 @@ async function callDeepSeekForExtraction(settings: AppSettings, prompt: string):
       temperature: 0.3, // 降低温度以获得更稳定的输出
       max_tokens: 4000  // 确保有足够空间输出完整 JSON
     })
-  });
+  }, DEFAULT_API_TIMEOUT * 2); // Extraction tasks may take longer
   
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: "Unknown error" }));

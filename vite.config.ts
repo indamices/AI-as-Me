@@ -18,6 +18,32 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
-      }
+      },
+      test: {
+        globals: true,
+        environment: 'jsdom',
+        setupFiles: './test/setup.ts',
+        css: true,
+        include: ['test/**/*.test.{ts,tsx}'],
+        exclude: [
+          'node_modules/',
+          '.vscode/',
+          'dist/',
+          '**/*.d.ts',
+        ],
+        coverage: {
+          provider: 'v8',
+          reporter: ['text', 'json', 'html'],
+          exclude: [
+            'node_modules/',
+            'test/',
+            '.vscode/',
+            'dist/',
+            '**/*.d.ts',
+            '**/*.config.*',
+            '**/mockData/**',
+          ],
+        },
+      },
     };
 });

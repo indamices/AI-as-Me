@@ -1,12 +1,27 @@
 {
-  "name": "personaengine:-个人记忆治理系统",
+  "name": "personaengine",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0-beta",
+  "description": "一个精密的人格知识与记忆治理系统，通过5层架构、双轨意图和元演进跟踪实现人工智能与人类的对齐",
+  "keywords": [
+    "ai",
+    "memory-management",
+    "persona",
+    "knowledge-base",
+    "react",
+    "typescript",
+    "gemini",
+    "deepseek"
+  ],
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "react-dom": "^19.2.3",

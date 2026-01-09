@@ -25,6 +25,7 @@ const ImportHub: React.FC<ImportHubProps> = ({
   const [syncStep, setSyncStep] = useState(0);
   const [extractionMode, setExtractionMode] = useState<ExtractionMode>('MIXED');
   const [uploadedFilename, setUploadedFilename] = useState<string>('');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const steps = [
@@ -36,13 +37,25 @@ const ImportHub: React.FC<ImportHubProps> = ({
   ];
 
   const handleProcessText = async () => {
-    if (!inputText.trim() || !settings) return;
+    if (!inputText.trim() || !settings) {
+      setErrorMessage('请输入内容或检查设置配置');
+      return;
+    }
+    
     setIsSyncing(true);
+    setErrorMessage(null);
+    setSyncStep(0);
     
     // Check for duplicate content
-    const contentHash = await calculateContentHash(inputText);
-    if (existingHashes.has(contentHash)) {
-      alert('检测到重复内容，已跳过处理。');
+    try {
+      const contentHash = await calculateContentHash(inputText);
+      if (existingHashes.has(contentHash)) {
+        setErrorMessage('检测到重复内容，已跳过处理。');
+        setIsSyncing(false);
+        return;
+      }
+    } catch (err) {
+      setErrorMessage('内容哈希计算失败，请重试');
       setIsSyncing(false);
       return;
     }
@@ -164,13 +177,16 @@ const ImportHub: React.FC<ImportHubProps> = ({
       setIsSyncing(false);
       setInputText('');
       setUploadedFilename('');
+      setErrorMessage(null);
     } catch (error) {
       console.error('Extraction failed:', error);
+      const errorMsg = error instanceof Error ? error.message : '未知错误';
+      setErrorMessage(`提取失败：${errorMsg}。请检查 API 配置或网络连接。`);
       if (onImportUpload) {
         onImportUpload({
           ...uploadRecord,
           status: 'FAILED',
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: errorMsg
         });
       }
       setIsSyncing(false);
@@ -204,6 +220,19 @@ const ImportHub: React.FC<ImportHubProps> = ({
         <h2 className="text-3xl font-bold mb-4">数据导入中心</h2>
         <p className="text-gray-400 text-lg">将已有的对话历史或文件导入人格引擎，我们会通过 AI 提取并生成可治理的认知记忆条目。</p>
       </header>
+
+      {errorMessage && (
+        <div className="max-w-4xl mb-6 p-4 bg-red-600/20 border border-red-500/30 rounded-2xl text-red-400 text-sm flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+          <i className="fa-solid fa-triangle-exclamation"></i>
+          <span>{errorMessage}</span>
+          <button 
+            onClick={() => setErrorMessage(null)}
+            className="ml-auto text-red-400 hover:text-red-300"
+          >
+            <i className="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      )}
 
       {!isSyncing ? (
         <div className="max-w-4xl space-y-8 animate-in fade-in duration-500">

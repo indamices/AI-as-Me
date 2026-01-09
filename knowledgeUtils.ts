@@ -19,39 +19,77 @@ export function retrieveRelevantKnowledge(
   knowledgeItems: KnowledgeItem[],
   limit: number = 5
 ): KnowledgeItem[] {
+  // Return empty array for empty or whitespace-only queries
+  if (!query || query.trim().length === 0) {
+    return [];
+  }
+  
   const queryLower = query.toLowerCase();
   const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
   
-  // Score each knowledge item
+  // Validate limit
+  const validLimit = Math.max(1, Math.min(limit || 5, 100)); // Clamp between 1 and 100
+  
+  // Pre-compile regex patterns for better performance
+  const queryWordPatterns = queryWords.map(word => {
+    try {
+      // Escape special regex characters
+      const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(escaped, 'gi');
+    } catch (e) {
+      // If regex fails, fall back to string includes
+      return null;
+    }
+  });
+  
+  // Score each knowledge item - filter out null/undefined and inactive items
   const scored = knowledgeItems
-    .filter(k => k.status === 'ACTIVE')
+    .filter((k): k is typeof k => k != null && k.status === 'ACTIVE' && k.title != null && k.content != null)
     .map(item => {
       let score = 0;
-      const contentLower = (item.title + ' ' + item.content).toLowerCase();
+      const title = String(item.title || '');
+      const content = String(item.content || '');
+      const contentLower = (title + ' ' + content).toLowerCase();
       
       // Tag matching
-      item.tags.forEach(tag => {
-        if (queryLower.includes(tag.toLowerCase()) || tag.toLowerCase().includes(queryLower)) {
-          score += 3;
-        }
-      });
+      if (Array.isArray(item.tags)) {
+        item.tags.forEach(tag => {
+          if (tag && typeof tag === 'string') {
+            const tagLower = tag.toLowerCase();
+            if (queryLower.includes(tagLower) || tagLower.includes(queryLower)) {
+              score += 3;
+            }
+          }
+        });
+      }
       
       // Title matching
-      if (item.title.toLowerCase().includes(queryLower)) {
+      if (title.toLowerCase().includes(queryLower)) {
         score += 5;
       }
       
-      // Content keyword matching
-      queryWords.forEach(word => {
-        const count = (contentLower.match(new RegExp(word, 'g')) || []).length;
-        score += count * 0.5;
+      // Content keyword matching - use pre-compiled patterns
+      queryWordPatterns.forEach((pattern, idx) => {
+        if (pattern) {
+          try {
+            const matches = contentLower.match(pattern);
+            if (matches) {
+              score += matches.length * 0.5;
+            }
+          } catch (e) {
+            // Fallback to string includes if regex fails
+            if (contentLower.includes(queryWords[idx])) {
+              score += 0.5;
+            }
+          }
+        }
       });
       
       return { item, score };
     })
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
+    .slice(0, validLimit)
     .map(({ item }) => item);
   
   return scored;
@@ -61,9 +99,16 @@ export function retrieveRelevantKnowledge(
  * Format knowledge items as context string for AI
  */
 export function formatKnowledgeContext(knowledgeItems: KnowledgeItem[]): string {
-  if (knowledgeItems.length === 0) return '';
+  if (!knowledgeItems || knowledgeItems.length === 0) return '';
   
   return knowledgeItems
-    .map(k => `[${k.type}] ${k.title}\n${k.content.slice(0, 200)}${k.content.length > 200 ? '...' : ''}`)
+    .filter((k): k is KnowledgeItem => k != null && k.type != null && k.title != null && k.content != null)
+    .map(k => {
+      const title = String(k.title || '');
+      const content = String(k.content || '');
+      const type = String(k.type || 'UNKNOWN');
+      const truncated = content.length > 200 ? content.slice(0, 200) + '...' : content;
+      return `[${type}] ${title}\n${truncated}`;
+    })
     .join('\n\n');
 }

@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Deployment
+# Keep render.yaml and public/_redirects for deployment
+
+# Test coverage
+coverage/

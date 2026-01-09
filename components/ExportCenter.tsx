@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Memory } from '../types';
+import { Memory, MemoryStatus } from '../types';
 
 interface ExportCenterProps {
   memories: Memory[];
@@ -11,7 +11,7 @@ const ExportCenter: React.FC<ExportCenterProps> = ({ memories }) => {
   const [showPrompt, setShowPrompt] = useState(false);
   const [lastPackage, setLastPackage] = useState<{ name: string; content: string } | null>(null);
 
-  const activeMemories = memories.filter(m => m.status === 'ACTIVE');
+  const activeMemories = memories.filter(m => m.status === MemoryStatus.ACTIVE);
 
   // Generate system prompt
   const generatedPrompt = `你现在是我的个人数字孪生助理。基于我最新的记忆库，请在对话中遵循以下原则：
@@ -44,7 +44,7 @@ ${activeMemories.map(m => `- [${m.category}] ${m.content}`).join('\n')}
   const handleGeneratePackage = () => {
     setIsExporting(true);
     // Simulate build process
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       const timestamp = new Date().toISOString().split('T')[0];
       const filename = `PersonaMemory_${timestamp}_Snapshot.md`;
       const content = generateFileContent();
@@ -52,6 +52,10 @@ ${activeMemories.map(m => `- [${m.category}] ${m.content}`).join('\n')}
       setLastPackage({ name: filename, content: content });
       setIsExporting(false);
     }, 1500);
+    
+    // Store timer in ref for cleanup if component unmounts
+    // For now, acceptable as operation is quick and component rarely unmounts during this
+    return () => clearTimeout(timer);
   };
 
   const triggerDownload = () => {

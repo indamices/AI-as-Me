@@ -21,6 +21,39 @@ import { extractInsightsFromChat, extractKnowledgeFromText } from './geminiServi
 import { findSimilarMemories, calculateQualityScore, calculateMergedConfidence } from './memoryUtils';
 import { calculateContentHash, retrieveRelevantKnowledge, formatKnowledgeContext } from './knowledgeUtils';
 
+// Safe JSON parse with error handling
+const safeJSONParse = <T,>(json: string | null, defaultValue: T): T => {
+  if (!json) return defaultValue;
+  try {
+    return JSON.parse(json) as T;
+  } catch (e) {
+    console.error('Failed to parse JSON from localStorage:', e);
+    console.error('Invalid JSON:', json);
+    return defaultValue;
+  }
+};
+
+// Safe localStorage setItem with quota handling
+const safeLocalStorageSet = (key: string, value: string): boolean => {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    if (e instanceof DOMException) {
+      if (e.name === 'QuotaExceededError') {
+        console.error('LocalStorage quota exceeded for key:', key);
+        // Try to clear old data or notify user
+        alert('存储空间不足，请清理一些数据或联系支持。');
+      } else {
+        console.error('LocalStorage error:', e);
+      }
+    } else {
+      console.error('Unexpected error setting localStorage:', e);
+    }
+    return false;
+  }
+};
+
 // Helper function to extract relevant evidence from conversation history
 const extractEvidenceContext = (
   content: string,
@@ -64,11 +97,15 @@ const STORAGE_KEYS = {
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'vault' | 'queue' | 'intents' | 'evolution' | 'chat' | 'import' | 'export' | 'settings' | 'knowledge' | 'uploads' | 'sessions'>('chat');
   
-  // Initialize and load from localStorage
-  const [memories, setMemories] = useState<Memory[]>(() => JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMORIES) || '[]'));
-  const [history, setHistory] = useState<EvolutionRecord[]>(() => JSON.parse(localStorage.getItem(STORAGE_KEYS.HISTORY) || '[]'));
+  // Initialize and load from localStorage with safe parsing
+  const [memories, setMemories] = useState<Memory[]>(() => 
+    safeJSONParse(localStorage.getItem(STORAGE_KEYS.MEMORIES), [])
+  );
+  const [history, setHistory] = useState<EvolutionRecord[]>(() => 
+    safeJSONParse(localStorage.getItem(STORAGE_KEYS.HISTORY), [])
+  );
   const [proposals, setProposals] = useState<InsightProposal[]>(() => {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEYS.PROPOSALS) || '[]');
+    const saved = safeJSONParse<InsightProposal[]>(localStorage.getItem(STORAGE_KEYS.PROPOSALS), []);
     // Ensure old data has new fields
     return saved.map((p: any) => ({
       ...p,
@@ -81,11 +118,11 @@ const App: React.FC = () => {
   });
   const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.MESSAGES);
-    return saved ? JSON.parse(saved) : [{ role: 'assistant', content: "认知核已挂载。正在执行人格多维扫描协议。我们可以从任何维度开始，我也将尝试探测你的认知边界。" }];
+    return saved ? safeJSONParse(saved, [{ role: 'assistant', content: "认知核已挂载。正在执行人格多维扫描协议。我们可以从任何维度开始，我也将尝试探测你的认知边界。" }]) 
+                 : [{ role: 'assistant', content: "认知核已挂载。正在执行人格多维扫描协议。我们可以从任何维度开始，我也将尝试探测你的认知边界。" }];
   });
   
   const [settings, setSettings] = useState<AppSettings>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
     const defaultSettings = {
       geminiApiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || '',
       geminiModel: 'gemini-3-pro-preview',
@@ -96,8 +133,9 @@ const App: React.FC = () => {
       autoMergeThreshold: 0.85,
       qualityFilterEnabled: true
     };
+    const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
     if (saved) {
-      const parsed = JSON.parse(saved);
+      const parsed = safeJSONParse<AppSettings>(saved, defaultSettings);
       // Merge with defaults to ensure new fields exist
       return { ...defaultSettings, ...parsed };
     }
@@ -108,26 +146,45 @@ const App: React.FC = () => {
   const [isExtractingInsights, setIsExtractingInsights] = useState(false);
   const [chatInput, setChatInput] = useState('');
   
+  // Use ref to track extraction state and prevent race conditions
+  const extractionInProgressRef = React.useRef(false);
+  
   // Knowledge Base state
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>(() => 
-    JSON.parse(localStorage.getItem(STORAGE_KEYS.KNOWLEDGE) || '[]')
+    safeJSONParse(localStorage.getItem(STORAGE_KEYS.KNOWLEDGE), [])
   );
   const [uploadRecords, setUploadRecords] = useState<UploadRecord[]>(() => 
-    JSON.parse(localStorage.getItem(STORAGE_KEYS.UPLOADS) || '[]')
+    safeJSONParse(localStorage.getItem(STORAGE_KEYS.UPLOADS), [])
   );
   const [sessions, setSessions] = useState<ConversationSession[]>(() => 
-    JSON.parse(localStorage.getItem(STORAGE_KEYS.SESSIONS) || '[]')
+    safeJSONParse(localStorage.getItem(STORAGE_KEYS.SESSIONS), [])
   );
 
-  // Auto-save logic
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.MEMORIES, JSON.stringify(memories)); }, [memories]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history)); }, [history]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.PROPOSALS, JSON.stringify(proposals)); }, [proposals]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings)); }, [settings]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(chatMessages)); }, [chatMessages]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.KNOWLEDGE, JSON.stringify(knowledgeItems)); }, [knowledgeItems]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.UPLOADS, JSON.stringify(uploadRecords)); }, [uploadRecords]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(sessions)); }, [sessions]);
+  // Auto-save logic with safe storage
+  useEffect(() => { 
+    safeLocalStorageSet(STORAGE_KEYS.MEMORIES, JSON.stringify(memories)); 
+  }, [memories]);
+  useEffect(() => { 
+    safeLocalStorageSet(STORAGE_KEYS.HISTORY, JSON.stringify(history)); 
+  }, [history]);
+  useEffect(() => { 
+    safeLocalStorageSet(STORAGE_KEYS.PROPOSALS, JSON.stringify(proposals)); 
+  }, [proposals]);
+  useEffect(() => { 
+    safeLocalStorageSet(STORAGE_KEYS.SETTINGS, JSON.stringify(settings)); 
+  }, [settings]);
+  useEffect(() => { 
+    safeLocalStorageSet(STORAGE_KEYS.MESSAGES, JSON.stringify(chatMessages)); 
+  }, [chatMessages]);
+  useEffect(() => { 
+    safeLocalStorageSet(STORAGE_KEYS.KNOWLEDGE, JSON.stringify(knowledgeItems)); 
+  }, [knowledgeItems]);
+  useEffect(() => { 
+    safeLocalStorageSet(STORAGE_KEYS.UPLOADS, JSON.stringify(uploadRecords)); 
+  }, [uploadRecords]);
+  useEffect(() => { 
+    safeLocalStorageSet(STORAGE_KEYS.SESSIONS, JSON.stringify(sessions)); 
+  }, [sessions]);
 
   const handleClearAllData = useCallback(() => {
     localStorage.clear();
@@ -156,6 +213,8 @@ const App: React.FC = () => {
     setMemories(prev => {
       const memoryToDelete = prev.find(m => m.id === id);
       if (!memoryToDelete) return prev;
+      
+      // Use functional update for history to avoid race conditions
       setHistory(h => [...h, {
         id: crypto.randomUUID(),
         timestamp: new Date().toISOString(),
@@ -163,6 +222,7 @@ const App: React.FC = () => {
         affectedMemoryIds: [id],
         type: 'MANUAL_OVERRIDE'
       }]);
+      
       return prev.filter(m => m.id !== id);
     });
   }, []);
@@ -245,8 +305,15 @@ const App: React.FC = () => {
   }, []);
 
   const handleChatComplete = async (hist: { role: string; content: string }[]) => {
-    if (isExtractingInsights) return;
+    // Prevent concurrent extractions
+    if (extractionInProgressRef.current || isExtractingInsights) {
+      console.warn('Extraction already in progress, skipping...');
+      return;
+    }
+    
+    extractionInProgressRef.current = true;
     setIsExtractingInsights(true);
+    
     try {
       const insights = await extractInsightsFromChat(hist, settings);
       if (insights && insights.length > 0) {
@@ -412,6 +479,7 @@ const App: React.FC = () => {
       console.error("Harvesting failed:", e);
     } finally {
       setIsExtractingInsights(false);
+      extractionInProgressRef.current = false;
     }
   };
 

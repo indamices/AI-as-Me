@@ -2,9 +2,12 @@
 import React, { useRef, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Memory, ChatMode, AppSettings, KnowledgeItem } from '../types';
+import { Memory, ChatMode, AppSettings, KnowledgeItem, MemoryStatus } from '../types';
 import { generateAgentResponse } from '../geminiService';
 import { retrieveRelevantKnowledge, formatKnowledgeContext } from '../knowledgeUtils';
+
+// AbortController for cancelling in-flight requests
+let currentAbortController: AbortController | null = null;
 
 interface ChatInterfaceProps {
   memories: Memory[];
@@ -34,6 +37,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   settings
 }) => {
   const [isTyping, setIsTyping] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,6 +69,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     const messageToSend = customMsg || input.trim();
     if (!messageToSend || isTyping) return;
 
+    // Cancel any in-flight request
+    if (currentAbortController) {
+      currentAbortController.abort();
+    }
+    
+    // Create new AbortController for this request
+    const abortController = new AbortController();
+    currentAbortController = abortController;
+
     if (!customMsg) setInput('');
     
     const newMessages = [...messages, { role: 'user' as const, content: messageToSend }];
@@ -72,7 +85,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setIsTyping(true);
 
     const contextStr = memories
-      .filter(m => m.status === 'ACTIVE')
+      .filter(m => m.status === MemoryStatus.ACTIVE)
       .map(m => `[${m.category}] ${m.content}`)
       .join('\n');
 
@@ -81,16 +94,37 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     const knowledgeContext = formatKnowledgeContext(relevantKnowledge);
 
     try {
+      setErrorMessage(null);
       const assistantResponse = await generateAgentResponse(messageToSend, newMessages, contextStr, mode, settings, knowledgeContext);
+      
+      // Check if request was aborted
+      if (abortController.signal.aborted) {
+        return;
+      }
+      
       const finalMessages = [
         ...newMessages, 
         { role: 'assistant' as const, content: assistantResponse || "认知同步失败。" }
       ];
       setMessages(finalMessages);
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: "网络链路中断。" }]);
+      // Ignore abort errors
+      if (abortController.signal.aborted) {
+        return;
+      }
+      
+      const errorMsg = err instanceof Error ? err.message : '网络链路中断';
+      setErrorMessage(errorMsg);
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: `❌ 错误：${errorMsg}。请检查网络连接或 API 配置。` 
+      }]);
     } finally {
-      setIsTyping(false);
+      // Only clear typing state if this is still the current request
+      if (currentAbortController === abortController) {
+        setIsTyping(false);
+        currentAbortController = null;
+      }
     }
   };
 
@@ -124,6 +158,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             <div className="px-4 py-2 bg-purple-600/20 border border-purple-500/30 rounded-full text-[10px] font-bold text-purple-400 flex items-center gap-2 backdrop-blur-md">
                <i className="fa-solid fa-microchip animate-spin text-[8px]"></i>
                认知收割中...
+            </div>
+          )}
+          {errorMessage && (
+            <div className="px-4 py-2 bg-red-600/20 border border-red-500/30 rounded-full text-[10px] font-bold text-red-400 flex items-center gap-2 backdrop-blur-md animate-in fade-in slide-in-from-top-2">
+               <i className="fa-solid fa-triangle-exclamation text-[8px]"></i>
+               错误：{errorMessage}
             </div>
           )}
         </div>

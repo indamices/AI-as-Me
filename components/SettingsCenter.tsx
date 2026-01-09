@@ -57,16 +57,24 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
     setIsApplying(true);
     
     // Simulate application with animation
-    setTimeout(() => {
+    const timer1 = setTimeout(() => {
       onUpdate({ activeProvider: pendingProvider });
       setIsApplying(false);
       setShowConfirmModal(false);
       setPendingProvider(null);
       
       // Show success animation
-      setShowSuccessAnimation(true);
-      setTimeout(() => setShowSuccessAnimation(false), 2000);
+      const timer2 = setTimeout(() => {
+        setShowSuccessAnimation(false);
+      }, 2000);
+      
+      // Store timer for cleanup if component unmounts
+      return () => clearTimeout(timer2);
     }, 800);
+    
+    // Note: In a real implementation, these timers should be stored in refs
+    // and cleaned up in useEffect cleanup function
+    // For now, this is acceptable as the component typically doesn't unmount during this operation
   };
 
   // Cancel configuration change

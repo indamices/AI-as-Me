@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: personaengine
+    env: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: 18.x
+    # Optional: Add environment variables for default API keys
+    # Users can still configure keys in the app settings
+    # - key: GEMINI_API_KEY
+    #   sync: false
+    # - key: DEEPSEEK_API_KEY
+    #   sync: false
