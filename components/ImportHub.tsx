@@ -46,42 +46,43 @@ const ImportHub: React.FC<ImportHubProps> = ({
     setErrorMessage(null);
     setSyncStep(0);
     
-    // Check for duplicate content
+    let contentHash: string = '';
+    let uploadRecord: any = null;
+    
     try {
-      const contentHash = await calculateContentHash(inputText);
-      if (existingHashes.has(contentHash)) {
-        setErrorMessage('检测到重复内容，已跳过处理。');
-        setIsSyncing(false);
-        return;
+      // Check for duplicate content
+      try {
+        contentHash = await calculateContentHash(inputText);
+        if (existingHashes.has(contentHash)) {
+          setErrorMessage('检测到重复内容，已跳过处理。');
+          setIsSyncing(false);
+          return;
+        }
+      } catch (err) {
+        throw new Error('内容哈希计算失败，请重试');
       }
-    } catch (err) {
-      setErrorMessage('内容哈希计算失败，请重试');
-      setIsSyncing(false);
-      return;
-    }
 
-    // Create upload record
-    const uploadRecord = {
-      id: crypto.randomUUID(),
-      filename: uploadedFilename || '手动输入',
-      content: inputText,
-      hash: contentHash,
-      uploadedAt: new Date().toISOString(),
-      status: 'PENDING' as const,
-      extractedMemories: [] as string[],
-      extractedKnowledge: [] as string[]
-    };
-    if (onImportUpload) {
-      onImportUpload(uploadRecord);
-    }
+      // Create upload record
+      uploadRecord = {
+        id: crypto.randomUUID(),
+        filename: uploadedFilename || '手动输入',
+        content: inputText,
+        hash: contentHash,
+        uploadedAt: new Date().toISOString(),
+        status: 'PENDING' as const,
+        extractedMemories: [] as string[],
+        extractedKnowledge: [] as string[]
+      };
+      if (onImportUpload) {
+        onImportUpload(uploadRecord);
+      }
 
-    // Simulate processing steps
-    for (let i = 0; i < steps.length; i++) {
-      setSyncStep(i);
-      await new Promise(r => setTimeout(r, 1000));
-    }
+      // Simulate processing steps
+      for (let i = 0; i < steps.length; i++) {
+        setSyncStep(i);
+        await new Promise(r => setTimeout(r, 1000));
+      }
 
-    try {
       const proposals: InsightProposal[] = [];
       const knowledgeItems: KnowledgeItem[] = [];
 
@@ -96,12 +97,20 @@ const ImportHub: React.FC<ImportHubProps> = ({
         throw new Error('DeepSeek API Key 未配置，请在设置页面配置');
       }
 
+      console.log('[ImportHub] Starting extraction', {
+        mode: extractionMode,
+        provider: settings.activeProvider,
+        hasApiKey: settings.activeProvider === 'GEMINI' ? !!settings.geminiApiKey : !!settings.deepseekKey
+      });
+
       // Extract based on mode
       if (extractionMode === 'PERSONA' || extractionMode === 'MIXED') {
+        console.log('[ImportHub] Starting persona extraction...');
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:97',message:'Starting parseImaConversationsBatch',data:{extractionMode,textLength:inputText.length,activeProvider:settings?.activeProvider,hasGeminiKey:!!settings?.geminiApiKey,hasDeepseekKey:!!settings?.deepseekKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
         // #endregion
         const results = await parseImaConversationsBatch(inputText, settings);
+        console.log('[ImportHub] Persona extraction completed', { resultsCount: results?.length || 0 });
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:90',message:'parseImaConversationsBatch completed',data:{resultsCount:results?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
         // #endregion
@@ -153,10 +162,12 @@ const ImportHub: React.FC<ImportHubProps> = ({
       }
 
       if (extractionMode === 'KNOWLEDGE' || extractionMode === 'MIXED') {
+        console.log('[ImportHub] Starting knowledge extraction...');
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:138',message:'Starting extractKnowledgeFromText',data:{extractionMode,textLength:inputText.length,activeProvider:settings?.activeProvider,hasGeminiKey:!!settings?.geminiApiKey,hasDeepseekKey:!!settings?.deepseekKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
         // #endregion
         const knowledgeResults = await extractKnowledgeFromText(inputText, settings);
+        console.log('[ImportHub] Knowledge extraction completed', { resultsCount: knowledgeResults?.length || 0 });
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:139',message:'extractKnowledgeFromText completed',data:{knowledgeResultsCount:knowledgeResults?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
         // #endregion
@@ -190,6 +201,11 @@ const ImportHub: React.FC<ImportHubProps> = ({
         });
       }
 
+      console.log('[ImportHub] Extraction completed', {
+        proposalsCount: proposals.length,
+        knowledgeCount: knowledgeItems.length
+      });
+
       if (proposals.length > 0) {
         onImport(proposals);
       }
@@ -205,11 +221,11 @@ const ImportHub: React.FC<ImportHubProps> = ({
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:193',message:'Extraction failed with error',data:{error: error instanceof Error ? error.message : String(error),errorStack: error instanceof Error ? error.stack : undefined,errorName: error instanceof Error ? error.name : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
       // #endregion
-      console.error('Extraction failed:', error);
+      console.error('[ImportHub] Extraction failed:', error);
       const errorMsg = error instanceof Error ? error.message : '未知错误';
       const errorDetails = error instanceof Error && error.stack ? `\n详情: ${error.stack.split('\n')[0]}` : '';
       setErrorMessage(`提取失败：${errorMsg}${errorDetails}。请检查 API 配置或网络连接。`);
-      if (onImportUpload) {
+      if (onImportUpload && uploadRecord) {
         onImportUpload({
           ...uploadRecord,
           status: 'FAILED',
@@ -217,6 +233,7 @@ const ImportHub: React.FC<ImportHubProps> = ({
         });
       }
       setIsSyncing(false);
+      setSyncStep(0);
     }
   };
 

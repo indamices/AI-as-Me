@@ -326,7 +326,13 @@ const App: React.FC = () => {
     // #endregion
     
     try {
+      console.log('[handleChatComplete] Starting extraction', {
+        historyLength: hist.length,
+        provider: settings.activeProvider,
+        hasApiKey: settings.activeProvider === 'GEMINI' ? !!settings.geminiApiKey : !!settings.deepseekKey
+      });
       const insights = await extractInsightsFromChat(hist, settings);
+      console.log('[handleChatComplete] Extraction completed', { insightsCount: insights?.length || 0 });
       
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:318',message:'extractInsightsFromChat returned',data:{insightsCount:insights?.length||0,insights:insights?.slice(0,2)||[]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
@@ -498,7 +504,9 @@ const App: React.FC = () => {
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:478',message:'Harvesting failed with error',data:{error: e instanceof Error ? e.message : String(e),errorStack: e instanceof Error ? e.stack : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
       // #endregion
-      console.error("Harvesting failed:", e);
+      console.error("[handleChatComplete] Harvesting failed:", e);
+      // Show error to user (could add a toast notification here)
+      alert(`认知收割失败：${e instanceof Error ? e.message : '未知错误'}。请检查 API 配置或网络连接。`);
     } finally {
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:480',message:'Extraction cleanup',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
