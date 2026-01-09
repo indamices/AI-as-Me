@@ -21,7 +21,12 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "version:patch": "npm version patch -m 'chore: bump version to %s'",
+    "version:minor": "npm version minor -m 'chore: bump version to %s'",
+    "version:major": "npm version major -m 'chore: bump version to %s'",
+    "release:prepare": "npm run test:run && npm run build",
+    "release:check": "git status --porcelain"
   },
   "dependencies": {
     "react-dom": "^19.2.3",

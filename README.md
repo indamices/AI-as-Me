@@ -8,6 +8,7 @@
 [![React](https://img.shields.io/badge/React-19.2-blue)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-6.2-purple)](https://vitejs.dev/)
 [![Test Coverage](https://img.shields.io/badge/Coverage-94%25-green)](./test)
+[![Version](https://img.shields.io/badge/version-0.1.0--beta-orange)](./CHANGELOG.md)
 
 </div>
 
@@ -280,7 +281,19 @@ AI-as-Me/
 
 ## 版本
 
-当前版本：`0.1.0-beta`
+- **当前版本**: `0.1.0-beta`
+- **变更日志**: [CHANGELOG.md](./CHANGELOG.md)
+- **版本管理指南**: [VERSIONING.md](./VERSIONING.md)
+
+### 提交规范
+
+本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/zh-hans/) 规范。提交信息格式：
+
+```
+<type>(<scope>): <subject>
+```
+
+类型包括：`feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`
 
 ## 支持
 
