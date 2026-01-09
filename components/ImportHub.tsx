@@ -1,9 +1,10 @@
 
 import React, { useState, useRef } from 'react';
 import { parseImaConversationsBatch, extractKnowledgeFromText } from '../geminiService';
-import { InsightProposal, AppSettings, ExtractionMode, KnowledgeItem } from '../types';
+import { InsightProposal, AppSettings, ExtractionMode, KnowledgeItem, Memory, ConversationSession, UploadRecord, EvolutionRecord } from '../types';
 import { calculateQualityScore, findSimilarMemories } from '../memoryUtils';
 import { calculateContentHash } from '../knowledgeUtils';
+import DataImport from './DataImport';
 
 interface ImportHubProps {
   onImport: (proposals: InsightProposal[]) => void;
@@ -11,6 +12,23 @@ interface ImportHubProps {
   onImportUpload?: (upload: any) => void;
   settings?: AppSettings;
   existingHashes?: Set<string>;
+  // For data package import
+  currentData?: {
+    memories: Memory[];
+    knowledge: KnowledgeItem[];
+    sessions: ConversationSession[];
+    uploads: UploadRecord[];
+    proposals: InsightProposal[];
+    history: EvolutionRecord[];
+  };
+  onImportDataPackage?: (data: {
+    memories: Memory[];
+    knowledge: KnowledgeItem[];
+    sessions: ConversationSession[];
+    uploads: UploadRecord[];
+    proposals: InsightProposal[];
+    history: EvolutionRecord[];
+  }) => void;
 }
 
 const ImportHub: React.FC<ImportHubProps> = ({ 
@@ -18,7 +36,9 @@ const ImportHub: React.FC<ImportHubProps> = ({
   onImportKnowledge,
   onImportUpload,
   settings,
-  existingHashes = new Set()
+  existingHashes = new Set(),
+  currentData,
+  onImportDataPackage
 }) => {
   const [inputText, setInputText] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
@@ -26,6 +46,7 @@ const ImportHub: React.FC<ImportHubProps> = ({
   const [extractionMode, setExtractionMode] = useState<ExtractionMode>('MIXED');
   const [uploadedFilename, setUploadedFilename] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [importMode, setImportMode] = useState<'extract' | 'package'>('extract');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const steps = [
@@ -265,20 +286,61 @@ const ImportHub: React.FC<ImportHubProps> = ({
         <p className="text-gray-400 text-lg">将已有的对话历史或文件导入人格引擎，我们会通过 AI 提取并生成可治理的认知记忆条目。</p>
       </header>
 
-      {errorMessage && (
-        <div className="max-w-4xl mb-6 p-4 bg-red-600/20 border border-red-500/30 rounded-2xl text-red-400 text-sm flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
-          <i className="fa-solid fa-triangle-exclamation"></i>
-          <span>{errorMessage}</span>
-          <button 
-            onClick={() => setErrorMessage(null)}
-            className="ml-auto text-red-400 hover:text-red-300"
+      {/* Mode Selection */}
+      <div className="max-w-4xl mb-8">
+        <div className="glass-panel p-2 rounded-2xl border border-white/10 inline-flex gap-2">
+          <button
+            onClick={() => setImportMode('extract')}
+            className={`px-6 py-2 rounded-xl font-bold text-sm transition-all ${
+              importMode === 'extract'
+                ? 'bg-blue-600 text-white'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
           >
-            <i className="fa-solid fa-xmark"></i>
+            <i className="fa-solid fa-wand-magic-sparkles mr-2"></i>
+            文本提取导入
+          </button>
+          <button
+            onClick={() => setImportMode('package')}
+            className={`px-6 py-2 rounded-xl font-bold text-sm transition-all ${
+              importMode === 'package'
+                ? 'bg-blue-600 text-white'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <i className="fa-solid fa-box-archive mr-2"></i>
+            数据包导入
           </button>
         </div>
-      )}
+      </div>
 
-      {!isSyncing ? (
+      {importMode === 'package' ? (
+        currentData && onImportDataPackage ? (
+          <DataImport 
+            currentData={currentData}
+            onImport={onImportDataPackage}
+          />
+        ) : (
+          <div className="max-w-4xl">
+            <p className="text-gray-500 text-sm mb-4">数据包导入功能需要从导出中心获取数据包文件。请切换到"导出引擎"标签页导出数据包。</p>
+          </div>
+        )
+      ) : (
+        <>
+          {errorMessage && (
+            <div className="max-w-4xl mb-6 p-4 bg-red-600/20 border border-red-500/30 rounded-2xl text-red-400 text-sm flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+              <i className="fa-solid fa-triangle-exclamation"></i>
+              <span>{errorMessage}</span>
+              <button 
+                onClick={() => setErrorMessage(null)}
+                className="ml-auto text-red-400 hover:text-red-300"
+              >
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+          )}
+
+          {!isSyncing ? (
         <div className="max-w-4xl space-y-8 animate-in fade-in duration-500">
           {/* 文件上传区 */}
           <div 
@@ -362,25 +424,27 @@ const ImportHub: React.FC<ImportHubProps> = ({
               </button>
             </div>
           </div>
-        </div>
-      ) : (
-        <div className="max-w-3xl flex flex-col items-center justify-center py-24 animate-in fade-in zoom-in duration-500 mx-auto">
-          <div className="relative mb-12">
-            <div className="w-40 h-40 rounded-full border-4 border-blue-500/10 border-t-blue-500 animate-spin"></div>
-            <div className="absolute inset-0 flex items-center justify-center">
-               <i className="fa-solid fa-brain text-4xl text-blue-400 animate-pulse"></i>
+          </div>
+          ) : (
+            <div className="max-w-3xl flex flex-col items-center justify-center py-24 animate-in fade-in zoom-in duration-500 mx-auto">
+              <div className="relative mb-12">
+                <div className="w-40 h-40 rounded-full border-4 border-blue-500/10 border-t-blue-500 animate-spin"></div>
+                <div className="absolute inset-0 flex items-center justify-center">
+                   <i className="fa-solid fa-brain text-4xl text-blue-400 animate-pulse"></i>
+                </div>
+              </div>
+              <h3 className="text-3xl font-bold mb-4">正在进行认知提取...</h3>
+              <p className="text-blue-400 font-mono text-lg mb-10 h-8">{steps[syncStep]}</p>
+              
+              <div className="w-full max-w-lg bg-white/5 h-2 rounded-full overflow-hidden shadow-inner">
+                <div 
+                  className="bg-gradient-to-r from-blue-600 to-cyan-400 h-full transition-all duration-700 ease-out shadow-[0_0_15px_rgba(37,99,235,0.5)]" 
+                  style={{ width: `${((syncStep + 1) / steps.length) * 100}%` }}
+                ></div>
+              </div>
             </div>
-          </div>
-          <h3 className="text-3xl font-bold mb-4">正在进行认知提取...</h3>
-          <p className="text-blue-400 font-mono text-lg mb-10 h-8">{steps[syncStep]}</p>
-          
-          <div className="w-full max-w-lg bg-white/5 h-2 rounded-full overflow-hidden shadow-inner">
-            <div 
-              className="bg-gradient-to-r from-blue-600 to-cyan-400 h-full transition-all duration-700 ease-out shadow-[0_0_15px_rgba(37,99,235,0.5)]" 
-              style={{ width: `${((syncStep + 1) / steps.length) * 100}%` }}
-            ></div>
-          </div>
-        </div>
+          )}
+        </>
       )}
     </div>
   );
