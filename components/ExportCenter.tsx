@@ -300,7 +300,7 @@ const ExportCenter: React.FC<ExportCenterProps> = ({
               </li>
               <li className="text-xs text-gray-500 flex gap-2">
                 <span className="text-blue-500 font-bold">•</span>
-                大文件（>5MB）建议启用压缩选项以减少文件大小。
+                大文件（&gt;5MB）建议启用压缩选项以减少文件大小。
               </li>
               <li className="text-xs text-gray-500 flex gap-2">
                 <span className="text-blue-500 font-bold">•</span>
