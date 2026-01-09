@@ -229,7 +229,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           
           <div className="flex justify-between items-center px-4">
              <div className="flex gap-3">
-                <button onClick={() => onChatComplete(messages)} disabled={messages.length < 2 || isExtracting} className="flex items-center gap-2 px-5 py-2 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-bold uppercase tracking-widest hover:bg-purple-500/20 transition-all disabled:opacity-30">
+                <button onClick={() => {
+                  // #region agent log
+                  fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatInterface.tsx:232',message:'Cognitive harvest button clicked',data:{messagesLength:messages.length,isExtracting,isDisabled:messages.length < 2 || isExtracting},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+                  // #endregion
+                  onChatComplete(messages);
+                }} disabled={messages.length < 2 || isExtracting} className="flex items-center gap-2 px-5 py-2 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-bold uppercase tracking-widest hover:bg-purple-500/20 transition-all disabled:opacity-30">
                   <i className="fa-solid fa-brain-circuit"></i>
                   认知收割
                 </button>

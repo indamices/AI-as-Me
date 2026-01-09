@@ -85,9 +85,26 @@ const ImportHub: React.FC<ImportHubProps> = ({
       const proposals: InsightProposal[] = [];
       const knowledgeItems: KnowledgeItem[] = [];
 
+      // Validate settings before extraction
+      if (!settings) {
+        throw new Error('设置未配置');
+      }
+      if (settings.activeProvider === 'GEMINI' && !settings.geminiApiKey) {
+        throw new Error('Gemini API Key 未配置，请在设置页面配置');
+      }
+      if (settings.activeProvider === 'DEEPSEEK' && !settings.deepseekKey) {
+        throw new Error('DeepSeek API Key 未配置，请在设置页面配置');
+      }
+
       // Extract based on mode
       if (extractionMode === 'PERSONA' || extractionMode === 'MIXED') {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:97',message:'Starting parseImaConversationsBatch',data:{extractionMode,textLength:inputText.length,activeProvider:settings?.activeProvider,hasGeminiKey:!!settings?.geminiApiKey,hasDeepseekKey:!!settings?.deepseekKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         const results = await parseImaConversationsBatch(inputText, settings);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:90',message:'parseImaConversationsBatch completed',data:{resultsCount:results?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         const newProposals = results.map((r: any) => {
           const confidence = r.confidence ?? 0.7;
           const evidenceStrength = r.evidenceStrength ?? 0.6;
@@ -136,7 +153,13 @@ const ImportHub: React.FC<ImportHubProps> = ({
       }
 
       if (extractionMode === 'KNOWLEDGE' || extractionMode === 'MIXED') {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:138',message:'Starting extractKnowledgeFromText',data:{extractionMode,textLength:inputText.length,activeProvider:settings?.activeProvider,hasGeminiKey:!!settings?.geminiApiKey,hasDeepseekKey:!!settings?.deepseekKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         const knowledgeResults = await extractKnowledgeFromText(inputText, settings);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:139',message:'extractKnowledgeFromText completed',data:{knowledgeResultsCount:knowledgeResults?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         const newKnowledge = knowledgeResults.map((k: any) => ({
           id: crypto.randomUUID(),
           title: k.title,
@@ -179,9 +202,13 @@ const ImportHub: React.FC<ImportHubProps> = ({
       setUploadedFilename('');
       setErrorMessage(null);
     } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:193',message:'Extraction failed with error',data:{error: error instanceof Error ? error.message : String(error),errorStack: error instanceof Error ? error.stack : undefined,errorName: error instanceof Error ? error.name : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
       console.error('Extraction failed:', error);
       const errorMsg = error instanceof Error ? error.message : '未知错误';
-      setErrorMessage(`提取失败：${errorMsg}。请检查 API 配置或网络连接。`);
+      const errorDetails = error instanceof Error && error.stack ? `\n详情: ${error.stack.split('\n')[0]}` : '';
+      setErrorMessage(`提取失败：${errorMsg}${errorDetails}。请检查 API 配置或网络连接。`);
       if (onImportUpload) {
         onImportUpload({
           ...uploadRecord,

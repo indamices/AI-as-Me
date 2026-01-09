@@ -305,8 +305,15 @@ const App: React.FC = () => {
   }, []);
 
   const handleChatComplete = async (hist: { role: string; content: string }[]) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:307',message:'handleChatComplete called',data:{histLength:hist.length,extractionInProgress:extractionInProgressRef.current,isExtracting:isExtractingInsights,activeProvider:settings.activeProvider,hasGeminiKey:!!settings.geminiApiKey,hasDeepseekKey:!!settings.deepseekKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    
     // Prevent concurrent extractions
     if (extractionInProgressRef.current || isExtractingInsights) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:310',message:'Extraction blocked by race condition',data:{extractionInProgress:extractionInProgressRef.current,isExtracting:isExtractingInsights},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       console.warn('Extraction already in progress, skipping...');
       return;
     }
@@ -314,8 +321,20 @@ const App: React.FC = () => {
     extractionInProgressRef.current = true;
     setIsExtractingInsights(true);
     
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:315',message:'Starting extraction',data:{activeProvider:settings.activeProvider,geminiModel:settings.geminiModel,deepseekModel:settings.deepseekModel},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    
     try {
       const insights = await extractInsightsFromChat(hist, settings);
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:318',message:'extractInsightsFromChat returned',data:{insightsCount:insights?.length||0,insights:insights?.slice(0,2)||[]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:319',message:'Checking insights result',data:{hasInsights:!!insights,insightsLength:insights?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+      
       if (insights && insights.length > 0) {
         // Pre-filtering mechanism
         const filteredInsights = insights.filter((insight: any) => {
@@ -476,8 +495,14 @@ const App: React.FC = () => {
         }
       }
     } catch (e) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:478',message:'Harvesting failed with error',data:{error: e instanceof Error ? e.message : String(e),errorStack: e instanceof Error ? e.stack : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       console.error("Harvesting failed:", e);
     } finally {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:480',message:'Extraction cleanup',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       setIsExtractingInsights(false);
       extractionInProgressRef.current = false;
     }

@@ -7,6 +7,20 @@ const CATEGORY_ENUM = ['GOAL', 'PREFERENCE', 'HABIT', 'BOUNDARY', 'VALUE', 'PROJ
 
 // Default timeout for API calls (30 seconds)
 const DEFAULT_API_TIMEOUT = 30000;
+// Extended timeout for extraction tasks (60 seconds)
+const EXTRACTION_TIMEOUT = 60000;
+
+/**
+ * Wrap async function with timeout
+ */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => 
+      setTimeout(() => reject(new Error(errorMessage)), timeoutMs)
+    )
+  ]);
+}
 
 /**
  * Fetch with timeout wrapper
@@ -48,7 +62,7 @@ async function callDeepSeek(settings: AppSettings, messages: any[]) {
       messages: messages,
       stream: false
     })
-  });
+  }, DEFAULT_API_TIMEOUT); // 30 seconds for chat
   
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: "Unknown error" }));
@@ -262,7 +276,7 @@ async function callDeepSeekForExtraction(settings: AppSettings, prompt: string):
       temperature: 0.3, // 降低温度以获得更稳定的输出
       max_tokens: 4000  // 确保有足够空间输出完整 JSON
     })
-  }, DEFAULT_API_TIMEOUT * 2); // Extraction tasks may take longer
+  }, EXTRACTION_TIMEOUT); // 60 seconds for extraction tasks
   
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: "Unknown error" }));
@@ -296,47 +310,66 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
   if (settings.activeProvider === 'GEMINI') {
     // Use API key from settings, fallback to environment variable
     const apiKey = settings.geminiApiKey || process.env.API_KEY || process.env.GEMINI_API_KEY;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:298',message:'Gemini API key check',data:{hasApiKey:!!apiKey,hasSettingsKey:!!settings.geminiApiKey,hasEnvKey:!!(process.env.API_KEY||process.env.GEMINI_API_KEY)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
     if (!apiKey) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:300',message:'Gemini API key missing',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
       console.error("Gemini API key not configured");
       return [];
     }
     const ai = new GoogleGenAI({ apiKey });
     try {
       const model = settings.geminiModel || 'gemini-3-pro-preview';
-      const response = await ai.models.generateContent({
-        model, // Use model from settings
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                content: { type: Type.STRING },
-                category: { type: Type.STRING, enum: CATEGORY_ENUM },
-                layer: { type: Type.INTEGER },
-                reasoning: { type: Type.STRING },
-                isSensitive: { type: Type.BOOLEAN },
-                // 新增字段
-                confidence: { type: Type.NUMBER },
-                evidenceStrength: { type: Type.NUMBER },
-                qualityIndicators: {
-                  type: Type.OBJECT,
-                  properties: {
-                    generalization: { type: Type.NUMBER },
-                    specificity: { type: Type.NUMBER },
-                    consistency: { type: Type.NUMBER }
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:304',message:'Calling Gemini API',data:{model,promptLength:prompt.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model, // Use model from settings
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  content: { type: Type.STRING },
+                  category: { type: Type.STRING, enum: CATEGORY_ENUM },
+                  layer: { type: Type.INTEGER },
+                  reasoning: { type: Type.STRING },
+                  isSensitive: { type: Type.BOOLEAN },
+                  // 新增字段
+                  confidence: { type: Type.NUMBER },
+                  evidenceStrength: { type: Type.NUMBER },
+                  qualityIndicators: {
+                    type: Type.OBJECT,
+                    properties: {
+                      generalization: { type: Type.NUMBER },
+                      specificity: { type: Type.NUMBER },
+                      consistency: { type: Type.NUMBER }
+                    }
                   }
-                }
-              },
-              required: ["content", "category", "layer", "reasoning", "isSensitive", "confidence", "evidenceStrength", "qualityIndicators"]
+                },
+                required: ["content", "category", "layer", "reasoning", "isSensitive", "confidence", "evidenceStrength", "qualityIndicators"]
+              }
             }
           }
-        }
-      });
+        }),
+        EXTRACTION_TIMEOUT,
+        `Gemini API 调用超时（${EXTRACTION_TIMEOUT / 1000}秒）`
+      );
       // Correct extraction: use .text property
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:338',message:'Gemini API response received',data:{hasText:!!response.text,textLength:response.text?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       const results = JSON.parse(response.text || '[]');
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:339',message:'Parsed Gemini results',data:{resultsCount:results?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       // 确保所有结果都有默认值
       return results.map((r: any) => ({
         ...r,
@@ -350,24 +383,45 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
         }
       }));
     } catch (e) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:352',message:'Gemini extraction failed',data:{error: e instanceof Error ? e.message : String(e),errorName: e instanceof Error ? e.name : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       console.error("Gemini insights extraction failed:", e);
       return [];
     }
   } else {
     // DeepSeek path - use optimized Chinese prompt
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:357',message:'DeepSeek path',data:{hasDeepseekKey:!!settings.deepseekKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
       if (!settings.deepseekKey) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:359',message:'DeepSeek API key missing',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
         console.error("DeepSeek API key not configured");
         return [];
       }
       const deepSeekPrompt = createDeepSeekExtractionPrompt(
         history.map(h => `${h.role}: ${h.content}`).join('\n')
       );
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:366',message:'Calling DeepSeek API',data:{promptLength:deepSeekPrompt.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       const text = await callDeepSeekForExtraction(settings, deepSeekPrompt);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:367',message:'DeepSeek response received',data:{textLength:text?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       const results = parseDeepSeekJSON(text);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:368',message:'Parsed DeepSeek results',data:{resultsCount:results?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       // Results are already validated and cleaned by parseDeepSeekJSON
       return results;
     } catch (e) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:371',message:'DeepSeek extraction failed',data:{error: e instanceof Error ? e.message : String(e),errorName: e instanceof Error ? e.name : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       console.error("DeepSeek insights extraction failed:", e);
       return [];
     }
@@ -378,6 +432,9 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
  * Batch parse external conversation records
  */
 export const parseImaConversationsBatch = async (text: string, settings?: AppSettings) => {
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:416',message:'parseImaConversationsBatch entry',data:{textLength:text.length,activeProvider:settings?.activeProvider||'GEMINI',hasGeminiKey:!!settings?.geminiApiKey,hasDeepseekKey:!!settings?.deepseekKey,hasEnvKey:!!(process.env.API_KEY||process.env.GEMINI_API_KEY)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
   // Check which provider to use
   const activeProvider = settings?.activeProvider || 'GEMINI';
   
@@ -416,46 +473,65 @@ ${text}`;
 
     // Use API key from settings if provided, otherwise fallback to environment variable
     const apiKey = settings?.geminiApiKey || process.env.API_KEY || process.env.GEMINI_API_KEY;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:454',message:'Gemini API key check for batch',data:{hasApiKey:!!apiKey,hasSettingsKey:!!settings?.geminiApiKey,hasEnvKey:!!(process.env.API_KEY||process.env.GEMINI_API_KEY)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
     if (!apiKey) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:456',message:'Gemini API key missing for batch',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
       console.error("Gemini API key not configured");
       return [];
     }
     const ai = new GoogleGenAI({ apiKey });
     try {
       const model = settings?.geminiModel || 'gemini-3-pro-preview';
-      const response = await ai.models.generateContent({
-        model, // Use model from settings
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                content: { type: Type.STRING },
-                category: { type: Type.STRING, enum: CATEGORY_ENUM },
-                layer: { type: Type.INTEGER },
-                reasoning: { type: Type.STRING },
-                isSensitive: { type: Type.BOOLEAN },
-                // 新增字段
-                confidence: { type: Type.NUMBER },
-                evidenceStrength: { type: Type.NUMBER },
-                qualityIndicators: {
-                  type: Type.OBJECT,
-                  properties: {
-                    generalization: { type: Type.NUMBER },
-                    specificity: { type: Type.NUMBER },
-                    consistency: { type: Type.NUMBER }
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:461',message:'Calling Gemini API for batch',data:{model,promptLength:prompt.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model, // Use model from settings
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  content: { type: Type.STRING },
+                  category: { type: Type.STRING, enum: CATEGORY_ENUM },
+                  layer: { type: Type.INTEGER },
+                  reasoning: { type: Type.STRING },
+                  isSensitive: { type: Type.BOOLEAN },
+                  // 新增字段
+                  confidence: { type: Type.NUMBER },
+                  evidenceStrength: { type: Type.NUMBER },
+                  qualityIndicators: {
+                    type: Type.OBJECT,
+                    properties: {
+                      generalization: { type: Type.NUMBER },
+                      specificity: { type: Type.NUMBER },
+                      consistency: { type: Type.NUMBER }
+                    }
                   }
-                }
-              },
-              required: ["content", "category", "layer", "reasoning", "isSensitive", "confidence", "evidenceStrength", "qualityIndicators"]
+                },
+                required: ["content", "category", "layer", "reasoning", "isSensitive", "confidence", "evidenceStrength", "qualityIndicators"]
+              }
             }
           }
-        }
-      });
+        }),
+        EXTRACTION_TIMEOUT,
+        `Gemini API 调用超时（${EXTRACTION_TIMEOUT / 1000}秒）`
+      );
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:528',message:'Gemini batch response received',data:{hasText:!!response.text,textLength:response.text?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
       const results = JSON.parse(response.text || '[]');
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:495',message:'Parsed batch results',data:{resultsCount:results?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
       // 确保所有结果都有默认值
       return results.map((r: any) => ({
         ...r,
@@ -469,6 +545,9 @@ ${text}`;
         }
       }));
     } catch (e) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:507',message:'Gemini batch parse failed',data:{error: e instanceof Error ? e.message : String(e),errorName: e instanceof Error ? e.name : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
       console.error("Gemini batch conversation parse failed:", e);
       return [];
     }
@@ -610,9 +689,18 @@ export async function extractKnowledgeFromText(
   tags: string[];
   summary: string;
 }>> {
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:639',message:'extractKnowledgeFromText entry',data:{textLength:text.length,activeProvider:settings.activeProvider,hasGeminiKey:!!settings.geminiApiKey,hasDeepseekKey:!!settings.deepseekKey,hasEnvKey:!!(process.env.API_KEY||process.env.GEMINI_API_KEY)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
   if (settings.activeProvider === 'GEMINI') {
     const apiKey = settings.geminiApiKey || process.env.API_KEY || process.env.GEMINI_API_KEY;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:650',message:'Gemini API key check for knowledge',data:{hasApiKey:!!apiKey,hasSettingsKey:!!settings.geminiApiKey,hasEnvKey:!!(process.env.API_KEY||process.env.GEMINI_API_KEY)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
     if (!apiKey) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:652',message:'Gemini API key missing for knowledge',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
       console.error("Gemini API key not configured");
       return [];
     }
@@ -620,7 +708,11 @@ export async function extractKnowledgeFromText(
     try {
       const model = settings.geminiModel || 'gemini-3-pro-preview';
       const prompt = createKnowledgeExtractionPrompt(text);
-      const response = await ai.models.generateContent({
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:658',message:'Calling Gemini API for knowledge',data:{model,promptLength:prompt.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      const response = await withTimeout(
+        ai.models.generateContent({
         model,
         contents: prompt,
         config: {
@@ -646,10 +738,22 @@ export async function extractKnowledgeFromText(
             }
           }
         }
-      });
+        }),
+        EXTRACTION_TIMEOUT,
+        `Gemini API 调用超时（${EXTRACTION_TIMEOUT / 1000}秒）`
+      );
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:740',message:'Gemini knowledge response received',data:{hasText:!!response.text,textLength:response.text?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
       const results = JSON.parse(response.text || '[]');
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:687',message:'Parsed knowledge results',data:{resultsCount:results?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
       return results;
     } catch (e) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:689',message:'Gemini knowledge extraction failed',data:{error: e instanceof Error ? e.message : String(e),errorName: e instanceof Error ? e.name : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
       console.error("Gemini knowledge extraction failed:", e);
       return [];
     }
@@ -661,8 +765,14 @@ export async function extractKnowledgeFromText(
         return [];
       }
       const prompt = createKnowledgeExtractionPrompt(text);
-      const text = await callDeepSeekForExtraction(settings, prompt);
-      const results = parseDeepSeekJSON(text);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:699',message:'Calling DeepSeek for knowledge',data:{promptLength:prompt.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      const responseText = await callDeepSeekForExtraction(settings, prompt);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:700',message:'DeepSeek knowledge response received',data:{textLength:responseText?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      const results = parseDeepSeekJSON(responseText);
       // Map to knowledge format
       return results.map((item: any) => ({
         title: item.title || item.content?.slice(0, 50) || '未命名知识',
