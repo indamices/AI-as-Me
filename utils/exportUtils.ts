@@ -83,6 +83,20 @@ export async function exportData(
   if (!includeRejected) {
     filteredProposals = filteredProposals.filter(p => p.status !== 'REJECTED');
   }
+  
+  // Ensure all proposals have summary field (for backward compatibility)
+  filteredProposals = filteredProposals.map((p: any) => {
+    if (!p.summary || typeof p.summary !== 'string') {
+      // Auto-generate summary from available fields
+      return {
+        ...p,
+        summary: p.reasoning || 
+                 p.proposedMemory?.content || 
+                 `Proposal ${p.id || 'unknown'}`
+      };
+    }
+    return p;
+  });
 
   // Build export data based on selected types
   const exportData: ExportPackage['data'] = {
