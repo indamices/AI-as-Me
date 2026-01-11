@@ -338,13 +338,25 @@ function validateProposal(proposal: any, index: number, errors: ValidationError[
       severity: 'error'
     });
   }
+  
+  // summary is required for new versions, but allow old versions without it
+  // Old versions might use reasoning or proposedMemory.content as summary
   if (!proposal.summary || typeof proposal.summary !== 'string') {
-    errors.push({
+    // Try to generate a summary from available fields for backward compatibility
+    const generatedSummary = proposal.reasoning || 
+                             proposal.proposedMemory?.content || 
+                             `Proposal ${proposal.id || index}`;
+    
+    // For old data, issue a warning instead of error and auto-fix
+    warnings.push({
       field: `data.proposals[${index}].summary`,
-      message: 'Missing or invalid summary',
-      severity: 'error'
+      message: `Missing summary, auto-generated from ${proposal.reasoning ? 'reasoning' : proposal.proposedMemory?.content ? 'content' : 'ID'}. Old version compatibility.`
     });
+    
+    // Auto-fix: add generated summary to the proposal object for import
+    proposal.summary = generatedSummary;
   }
+  
   if (!proposal.status || !['PENDING', 'ACCEPTED', 'REJECTED'].includes(proposal.status)) {
     errors.push({
       field: `data.proposals[${index}].status`,

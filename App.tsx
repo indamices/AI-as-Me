@@ -106,15 +106,24 @@ const App: React.FC = () => {
   );
   const [proposals, setProposals] = useState<InsightProposal[]>(() => {
     const saved = safeJSONParse<InsightProposal[]>(localStorage.getItem(STORAGE_KEYS.PROPOSALS), []);
-    // Ensure old data has new fields
-    return saved.map((p: any) => ({
-      ...p,
-      confidence: p.confidence ?? 0.7,
-      qualityScore: p.qualityScore ?? 0.6,
-      evidenceStrength: p.evidenceStrength ?? 0.6,
-      similarityMatches: p.similarityMatches || [],
-      extractionMetadata: p.extractionMetadata || undefined
-    }));
+    // Ensure old data has new fields, including summary
+    return saved.map((p: any) => {
+      // Auto-generate summary if missing (for backward compatibility)
+      const summary = p.summary || 
+                     p.reasoning || 
+                     p.proposedMemory?.content || 
+                     `Proposal ${p.id || 'unknown'}`;
+      
+      return {
+        ...p,
+        summary, // Ensure summary always exists
+        confidence: p.confidence ?? 0.7,
+        qualityScore: p.qualityScore ?? 0.6,
+        evidenceStrength: p.evidenceStrength ?? 0.6,
+        similarityMatches: p.similarityMatches || [],
+        extractionMetadata: p.extractionMetadata || undefined
+      };
+    });
   });
   const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.MESSAGES);
