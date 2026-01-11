@@ -576,6 +576,165 @@ ${text}`;
 };
 
 /**
+ * Generate assistant response stream
+ * Returns an async generator that yields text chunks
+ */
+export async function* generateAgentResponseStream(
+  message: string, 
+  history: { role: string; content: string }[], 
+  memoryContext: string, 
+  mode: 'STANDARD' | 'PROBE',
+  settings: AppSettings,
+  knowledgeContext?: string
+): AsyncGenerator<string, void, unknown> {
+  const probeInstruction = `你是一个"人格探针"。目标是通过对话立体化建模用户。
+[协议]：1.反单点聚焦，话题需跨越维度转场；2.主动寻找记忆留白；3.基于已知记忆提出深层质疑。`;
+
+  const standardInstruction = `你是一个贴心的数字孪生助手。
+[协议]：基于用户的长期记忆提供个性化建议。保持自然对话，不主动攻击。`;
+
+  const layoutInstruction = `
+[输出格式协议]：
+为了提升可读性，你**必须**使用 Markdown 格式化你的回答：
+1. **多级标题**：使用 ### 或 #### 划分逻辑区块。
+2. **结构化列表**：使用无序列表记录要点，有序列表记录步骤。
+3. **关键点强调**：对术语、核心结论、待办事项使用 **加粗**。
+4. **数据对比**：如果涉及多项参数或选项，请使用 Markdown 表格。
+5. **引用说明**：对于基于用户记忆的推论，可以使用 > 块引用。
+请确保回答视觉排版优雅，像一份精密的诊断报告。`;
+
+  const systemInstruction = `
+${mode === 'PROBE' ? probeInstruction : standardInstruction}
+${layoutInstruction}
+[已知记忆库]：
+${memoryContext}
+${knowledgeContext ? `\n[相关知识库]：\n${knowledgeContext}` : ''}
+`;
+
+  if (settings.activeProvider === 'GEMINI') {
+    const apiKey = settings.geminiApiKey || process.env.API_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error("Gemini API key not configured");
+      yield "认知同步失败：未配置 API Key。";
+      return;
+    }
+    const ai = new GoogleGenAI({ apiKey });
+    try {
+      const model = settings.geminiModel || 'gemini-3-flash-preview';
+      // Try streaming API, fallback to non-streaming if not available
+      try {
+        // Attempt to use stream API - adjust method name if needed
+        const streamResponse = await (ai.models as any).generateContentStream?.({
+          model,
+          contents: history.concat([{role: 'user', content: message}]).map(h => ({
+            role: h.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: h.content }]
+          })),
+          config: { systemInstruction: systemInstruction }
+        });
+
+        if (streamResponse && typeof streamResponse[Symbol.asyncIterator] === 'function') {
+          for await (const chunk of streamResponse) {
+            const text = (chunk as any).text || (chunk as any).candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) {
+              yield text;
+            }
+          }
+          return;
+        }
+      } catch (streamError) {
+        console.warn('Streaming not supported, using fallback:', streamError);
+      }
+      
+      // Fallback to non-streaming
+      const response = await ai.models.generateContent({
+        model,
+        contents: history.concat([{role: 'user', content: message}]).map(h => ({
+          role: h.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: h.content }]
+        })),
+        config: { systemInstruction: systemInstruction }
+      });
+      
+      // Yield complete response
+      const fullText = response.text || "认知同步失败。";
+      // Simulate streaming by yielding in chunks
+      const words = fullText.split(/(\s+)/);
+      let currentChunk = '';
+      for (const word of words) {
+        currentChunk += word;
+        if (currentChunk.length >= 20) { // Yield every ~20 characters
+          yield currentChunk;
+          currentChunk = '';
+          await new Promise(resolve => setTimeout(resolve, 50)); // Small delay for visual effect
+        }
+      }
+      if (currentChunk) {
+        yield currentChunk;
+      }
+    } catch (e) {
+      console.error("Gemini streaming failed:", e);
+      yield "认知链路异常。";
+    }
+  } else {
+    // DeepSeek streaming
+    try {
+      const msgs = [{ role: "system", content: systemInstruction }, ...history, { role: "user", content: message }];
+      const response = await fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${settings.deepseekKey}`
+        },
+        body: JSON.stringify({
+          model: settings.deepseekModel || "deepseek-chat",
+          messages: msgs,
+          stream: true
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`DeepSeek API error: ${response.statusText}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      if (!reader) {
+        throw new Error("Failed to get response reader");
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+            try {
+              const data = JSON.parse(line.slice(6));
+              const content = data.choices?.[0]?.delta?.content;
+              if (content) {
+                yield content;
+              }
+            } catch (e) {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("DeepSeek streaming failed:", e);
+      yield "DeepSeek 链路异常。";
+    }
+  }
+}
+
+/**
  * Generate assistant response
  * Uses Gemini 3 Flash for low-latency responses
  */

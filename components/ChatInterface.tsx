@@ -3,7 +3,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Memory, ChatMode, AppSettings, KnowledgeItem, MemoryStatus } from '../types';
-import { generateAgentResponse } from '../geminiService';
+import { generateAgentResponse, generateAgentResponseStream } from '../geminiService';
 import { retrieveRelevantKnowledge, formatKnowledgeContext } from '../knowledgeUtils';
 
 // AbortController for cancelling in-flight requests
@@ -41,6 +41,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const updateThrottleRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingContentRef = useRef<string>('');
 
   const scrollToBottom = (smooth = true) => {
     if (messagesEndRef.current) {
@@ -95,18 +97,88 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     try {
       setErrorMessage(null);
-      const assistantResponse = await generateAgentResponse(messageToSend, newMessages, contextStr, mode, settings, knowledgeContext);
       
-      // Check if request was aborted
-      if (abortController.signal.aborted) {
-        return;
+      // Create assistant message placeholder immediately
+      const assistantMessageIndex = newMessages.length;
+      setMessages([...newMessages, { role: 'assistant' as const, content: '' }]);
+      
+      // Use streaming response
+      let accumulatedContent = '';
+      try {
+        for await (const chunk of generateAgentResponseStream(
+          messageToSend, 
+          newMessages, 
+          contextStr, 
+          mode, 
+          settings, 
+          knowledgeContext
+        )) {
+          // Check if request was aborted
+          if (abortController.signal.aborted) {
+            return;
+          }
+          
+          accumulatedContent += chunk;
+          pendingContentRef.current = accumulatedContent;
+          
+          // Throttle updates to every 50ms for better performance
+          if (!updateThrottleRef.current) {
+            updateThrottleRef.current = setTimeout(() => {
+              // Update message content incrementally
+              setMessages(prev => {
+                const updated = [...prev];
+                if (updated[assistantMessageIndex]) {
+                  updated[assistantMessageIndex] = {
+                    ...updated[assistantMessageIndex],
+                    content: pendingContentRef.current
+                  };
+                }
+                return updated;
+              });
+              updateThrottleRef.current = null;
+            }, 50); // Update every 50ms
+          }
+        }
+        
+        // Final update to ensure all content is displayed
+        if (updateThrottleRef.current) {
+          clearTimeout(updateThrottleRef.current);
+          updateThrottleRef.current = null;
+        }
+        setMessages(prev => {
+          const updated = [...prev];
+          if (updated[assistantMessageIndex]) {
+            updated[assistantMessageIndex] = {
+              ...updated[assistantMessageIndex],
+              content: accumulatedContent
+            };
+          }
+          return updated;
+        });
+      } catch (streamErr) {
+        // If streaming fails, fallback to non-streaming
+        if (abortController.signal.aborted) {
+          return;
+        }
+        
+        console.warn('Streaming failed, falling back to non-streaming:', streamErr);
+        const assistantResponse = await generateAgentResponse(messageToSend, newMessages, contextStr, mode, settings, knowledgeContext);
+        
+        if (abortController.signal.aborted) {
+          return;
+        }
+        
+        setMessages(prev => {
+          const updated = [...prev];
+          if (updated[assistantMessageIndex]) {
+            updated[assistantMessageIndex] = {
+              ...updated[assistantMessageIndex],
+              content: assistantResponse || "认知同步失败。"
+            };
+          }
+          return updated;
+        });
       }
-      
-      const finalMessages = [
-        ...newMessages, 
-        { role: 'assistant' as const, content: assistantResponse || "认知同步失败。" }
-      ];
-      setMessages(finalMessages);
     } catch (err) {
       // Ignore abort errors
       if (abortController.signal.aborted) {
@@ -115,11 +187,27 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       
       const errorMsg = err instanceof Error ? err.message : '网络链路中断';
       setErrorMessage(errorMsg);
-      setMessages(prev => [...prev, { 
-        role: 'assistant', 
-        content: `❌ 错误：${errorMsg}。请检查网络连接或 API 配置。` 
-      }]);
+      setMessages(prev => {
+        const updated = [...prev];
+        // Ensure assistant message exists
+        if (updated.length === newMessages.length) {
+          updated.push({ role: 'assistant', content: '' });
+        }
+        const assistantIndex = updated.length - 1;
+        updated[assistantIndex] = {
+          role: 'assistant',
+          content: `❌ 错误：${errorMsg}。请检查网络连接或 API 配置。`
+        };
+        return updated;
+      });
     } finally {
+      // Clean up throttle timer
+      if (updateThrottleRef.current) {
+        clearTimeout(updateThrottleRef.current);
+        updateThrottleRef.current = null;
+      }
+      pendingContentRef.current = '';
+      
       // Only clear typing state if this is still the current request
       if (currentAbortController === abortController) {
         setIsTyping(false);
