@@ -1,5 +1,5 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { parseImaConversationsBatch, extractKnowledgeFromText } from '../geminiService';
 import { InsightProposal, AppSettings, ExtractionMode, KnowledgeItem, Memory, ConversationSession, UploadRecord, EvolutionRecord } from '../types';
 import { calculateQualityScore, findSimilarMemories } from '../memoryUtils';
@@ -9,9 +9,10 @@ import DataImport from './DataImport';
 interface ImportHubProps {
   onImport: (proposals: InsightProposal[]) => void;
   onImportKnowledge?: (knowledge: KnowledgeItem[]) => void;
-  onImportUpload?: (upload: any) => void;
+  onImportUpload?: (upload: UploadRecord) => void;
   settings?: AppSettings;
   existingHashes?: Set<string>;
+  uploadRecords?: UploadRecord[]; // Add uploadRecords prop for state restoration
   // For data package import
   currentData?: {
     memories: Memory[];
@@ -37,6 +38,7 @@ const ImportHub: React.FC<ImportHubProps> = ({
   onImportUpload,
   settings,
   existingHashes = new Set(),
+  uploadRecords = [],
   currentData,
   onImportDataPackage
 }) => {
@@ -47,7 +49,11 @@ const ImportHub: React.FC<ImportHubProps> = ({
   const [uploadedFilename, setUploadedFilename] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [importMode, setImportMode] = useState<'extract' | 'package'>('extract');
+  const [currentUploadId, setCurrentUploadId] = useState<string | null>(null);
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [elapsedTime, setElapsedTime] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const steps = [
     "初始化认知扫描引擎...",
@@ -56,6 +62,67 @@ const ImportHub: React.FC<ImportHubProps> = ({
     "Gemini 正在合成稳定 Memo...",
     "完成元数据标记与分类..."
   ];
+
+  // Restore state from uploadRecords on mount and when uploadRecords change
+  useEffect(() => {
+    // Find any in-progress task (prioritize current one if exists)
+    const currentInProgress = currentUploadId 
+      ? uploadRecords.find(u => u.id === currentUploadId && u.status === 'PENDING' && u.processingState)
+      : null;
+    
+    const anyInProgress = currentInProgress || uploadRecords.find(u => 
+      u.status === 'PENDING' && u.processingState
+    );
+    
+    if (anyInProgress && anyInProgress.processingState) {
+      // Update state from persisted record
+      setIsSyncing(true);
+      setSyncStep(anyInProgress.processingState.step);
+      setCurrentUploadId(anyInProgress.id);
+      const started = new Date(anyInProgress.processingState.startedAt).getTime();
+      if (!startTime || startTime !== started) {
+        setStartTime(started);
+      }
+      setUploadedFilename(anyInProgress.filename);
+    } else if (!anyInProgress && currentUploadId) {
+      // Task completed or failed, reset state
+      setIsSyncing(false);
+      setSyncStep(0);
+      setCurrentUploadId(null);
+      setStartTime(null);
+      setElapsedTime(0);
+      setUploadedFilename('');
+    }
+  }, [uploadRecords, currentUploadId, startTime]);
+
+  // Update elapsed time every second
+  useEffect(() => {
+    if (isSyncing && startTime) {
+      timerRef.current = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        setElapsedTime(elapsed);
+      }, 1000);
+      return () => {
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+        }
+      };
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      setElapsedTime(0);
+    }
+  }, [isSyncing, startTime]);
+
+  // Estimate remaining time based on step progress
+  const getEstimatedTimeRemaining = () => {
+    if (!isSyncing || syncStep === 0) return null;
+    const avgTimePerStep = 15; // Average 15 seconds per step
+    const remainingSteps = steps.length - syncStep - 1;
+    return Math.max(0, remainingSteps * avgTimePerStep);
+  };
 
   const handleProcessText = async () => {
     if (!inputText.trim() || !settings) {
@@ -84,24 +151,47 @@ const ImportHub: React.FC<ImportHubProps> = ({
       }
 
       // Create upload record
+      const uploadId = crypto.randomUUID();
+      const startedAt = new Date().toISOString();
       uploadRecord = {
-        id: crypto.randomUUID(),
+        id: uploadId,
         filename: uploadedFilename || '手动输入',
         content: inputText,
         hash: contentHash,
-        uploadedAt: new Date().toISOString(),
+        uploadedAt: startedAt,
         status: 'PENDING' as const,
         extractedMemories: [] as string[],
-        extractedKnowledge: [] as string[]
+        extractedKnowledge: [] as string[],
+        processingState: {
+          step: 0,
+          stepName: steps[0],
+          startedAt,
+          estimatedTimeRemaining: steps.length * 15
+        }
       };
+      setCurrentUploadId(uploadId);
+      setStartTime(Date.now());
       if (onImportUpload) {
         onImportUpload(uploadRecord);
       }
 
-      // Simulate processing steps
+      // Simulate processing steps with state updates
       for (let i = 0; i < steps.length; i++) {
         setSyncStep(i);
-        await new Promise(r => setTimeout(r, 1000));
+        const estimatedRemaining = (steps.length - i - 1) * 15;
+        if (onImportUpload) {
+          onImportUpload({
+            ...uploadRecord,
+            processingState: {
+              step: i,
+              stepName: steps[i],
+              startedAt,
+              estimatedTimeRemaining: estimatedRemaining
+            }
+          });
+        }
+        // Simulate step delay (reduced from 1000ms to make it faster)
+        await new Promise(r => setTimeout(r, 800));
       }
 
       const proposals: InsightProposal[] = [];
@@ -211,14 +301,15 @@ const ImportHub: React.FC<ImportHubProps> = ({
         knowledgeItems.push(...newKnowledge);
       }
 
-      // Update upload record
-      if (onImportUpload) {
+      // Update upload record - mark as processed
+      if (onImportUpload && uploadRecord) {
         onImportUpload({
           ...uploadRecord,
           status: 'PROCESSED',
           processedAt: new Date().toISOString(),
           extractedMemories: proposals.map(p => p.id),
-          extractedKnowledge: knowledgeItems.map(k => k.id)
+          extractedKnowledge: knowledgeItems.map(k => k.id),
+          processingState: undefined // Clear processing state
         });
       }
 
@@ -235,6 +326,10 @@ const ImportHub: React.FC<ImportHubProps> = ({
       }
 
       setIsSyncing(false);
+      setSyncStep(0);
+      setCurrentUploadId(null);
+      setStartTime(null);
+      setElapsedTime(0);
       setInputText('');
       setUploadedFilename('');
       setErrorMessage(null);
@@ -250,11 +345,15 @@ const ImportHub: React.FC<ImportHubProps> = ({
         onImportUpload({
           ...uploadRecord,
           status: 'FAILED',
-          error: errorMsg
+          error: errorMsg,
+          processingState: undefined // Clear processing state
         });
       }
       setIsSyncing(false);
       setSyncStep(0);
+      setCurrentUploadId(null);
+      setStartTime(null);
+      setElapsedTime(0);
     }
   };
 
@@ -432,15 +531,54 @@ const ImportHub: React.FC<ImportHubProps> = ({
                 <div className="absolute inset-0 flex items-center justify-center">
                    <i className="fa-solid fa-brain text-4xl text-blue-400 animate-pulse"></i>
                 </div>
+                {/* Heartbeat pulse effect */}
+                <div className="absolute inset-0 rounded-full bg-blue-500/20 animate-ping"></div>
               </div>
               <h3 className="text-3xl font-bold mb-4">正在进行认知提取...</h3>
-              <p className="text-blue-400 font-mono text-lg mb-10 h-8">{steps[syncStep]}</p>
+              <p className="text-blue-400 font-mono text-lg mb-4 h-8">{steps[syncStep]}</p>
               
-              <div className="w-full max-w-lg bg-white/5 h-2 rounded-full overflow-hidden shadow-inner">
-                <div 
-                  className="bg-gradient-to-r from-blue-600 to-cyan-400 h-full transition-all duration-700 ease-out shadow-[0_0_15px_rgba(37,99,235,0.5)]" 
-                  style={{ width: `${((syncStep + 1) / steps.length) * 100}%` }}
-                ></div>
+              {/* Progress bar with percentage */}
+              <div className="w-full max-w-lg mb-6">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm text-gray-400">进度</span>
+                  <span className="text-sm font-bold text-blue-400">
+                    {Math.round(((syncStep + 1) / steps.length) * 100)}%
+                  </span>
+                </div>
+                <div className="w-full bg-white/5 h-3 rounded-full overflow-hidden shadow-inner">
+                  <div 
+                    className="bg-gradient-to-r from-blue-600 to-cyan-400 h-full transition-all duration-700 ease-out shadow-[0_0_15px_rgba(37,99,235,0.5)]" 
+                    style={{ width: `${((syncStep + 1) / steps.length) * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+
+              {/* Time information */}
+              <div className="flex gap-8 text-sm text-gray-400 mb-6">
+                <div className="flex items-center gap-2">
+                  <i className="fa-solid fa-clock text-blue-400"></i>
+                  <span>已用时：{Math.floor(elapsedTime / 60)}:{(elapsedTime % 60).toString().padStart(2, '0')}</span>
+                </div>
+                {getEstimatedTimeRemaining() !== null && (
+                  <div className="flex items-center gap-2">
+                    <i className="fa-solid fa-hourglass-half text-purple-400"></i>
+                    <span>预计剩余：约 {getEstimatedTimeRemaining()} 秒</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Step indicator */}
+              <div className="flex gap-2">
+                {steps.map((_, index) => (
+                  <div
+                    key={index}
+                    className={`w-2 h-2 rounded-full transition-all ${
+                      index <= syncStep
+                        ? 'bg-blue-500 scale-110'
+                        : 'bg-white/10'
+                    }`}
+                  />
+                ))}
               </div>
             </div>
           )}

@@ -5,12 +5,13 @@ interface SidebarProps {
   activeTab: 'vault' | 'queue' | 'intents' | 'evolution' | 'chat' | 'import' | 'export' | 'settings' | 'knowledge' | 'uploads' | 'sessions';
   onTabChange: (tab: 'vault' | 'queue' | 'intents' | 'evolution' | 'chat' | 'import' | 'export' | 'settings' | 'knowledge' | 'uploads' | 'sessions') => void;
   pendingCount: number;
+  processingUploadsCount?: number;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, pendingCount }) => {
+const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, pendingCount, processingUploadsCount = 0 }) => {
   const menuItems = [
     { id: 'chat', label: '认知对话', icon: 'fa-message' },
-    { id: 'import', label: '数据导入', icon: 'fa-file-import' },
+    { id: 'import', label: '数据导入', icon: 'fa-file-import', badge: processingUploadsCount > 0 ? processingUploadsCount : undefined },
     { id: 'queue', label: '治理队列', icon: 'fa-list-check', badge: pendingCount },
     { id: 'vault', label: '长期记忆库', icon: 'fa-brain' },
     { id: 'knowledge', label: '知识库', icon: 'fa-book' },
@@ -50,8 +51,10 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, pendingCount 
                 <i className={`fa-solid ${item.icon} w-5`}></i>
                 <span className="text-sm font-medium">{item.label}</span>
               </div>
-              {item.badge && item.badge > 0 && (
-                <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+              {item.badge !== undefined && item.badge > 0 && (
+                <span className={`text-white text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  item.id === 'import' ? 'bg-blue-600 animate-pulse' : 'bg-red-600'
+                }`}>
                   {item.badge}
                 </span>
               )}

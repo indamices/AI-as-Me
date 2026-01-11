@@ -135,6 +135,12 @@ export interface UploadRecord {
   extractedMemories?: string[];  // 提取出的记忆 ID
   extractedKnowledge?: string[]; // 提取出的知识 ID
   error?: string;
+  processingState?: {
+    step: number;
+    stepName: string;
+    startedAt: string;
+    estimatedTimeRemaining?: number;
+  };
 }
 
 // Conversation Session

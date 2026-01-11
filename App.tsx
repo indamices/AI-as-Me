@@ -517,13 +517,17 @@ const App: React.FC = () => {
   };
 
   const pendingCount = proposals.filter(p => p.status === 'PENDING').length;
+  const processingUploadsCount = uploadRecords.filter(u => 
+    u.status === 'PENDING' && u.processingState
+  ).length;
 
   return (
     <div className="flex h-screen w-full bg-[#050505] text-gray-200 overflow-hidden font-sans antialiased">
       <Sidebar 
         activeTab={activeTab} 
         onTabChange={setActiveTab as any} 
-        pendingCount={pendingCount} 
+        pendingCount={pendingCount}
+        processingUploadsCount={processingUploadsCount}
       />
       
       <main className="flex-1 flex flex-col overflow-hidden min-h-0 relative">
@@ -557,6 +561,7 @@ const App: React.FC = () => {
           <ImportHub 
             settings={settings}
             existingHashes={new Set(uploadRecords.map(u => u.hash))}
+            uploadRecords={uploadRecords}
             currentData={{
               memories,
               knowledge: knowledgeItems,
@@ -602,6 +607,7 @@ const App: React.FC = () => {
                 }
                 return [...prev, upload];
               });
+              // Force re-render to update processing state
             }}
           />
         )}
