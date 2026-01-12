@@ -30,9 +30,10 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, pendingCount,
           <div className="w-10 h-10 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
             <i className="fa-solid fa-dna text-xl text-white"></i>
           </div>
-          <div>
+          <div className="flex-1">
             <h1 className="font-bold text-lg tracking-tight">人格引擎</h1>
             <p className="text-[10px] text-gray-500 font-mono uppercase">Memory Governance OS</p>
+            <p className="text-[9px] text-blue-400 font-mono font-bold mt-1">v{APP_VERSION}</p>
           </div>
         </div>
 
