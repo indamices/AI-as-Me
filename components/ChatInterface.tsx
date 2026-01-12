@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { Memory, ChatMode, AppSettings, KnowledgeItem, MemoryStatus } from '../types';
 import { generateAgentResponse, generateAgentResponseStream } from '../geminiService';
 import { retrieveRelevantKnowledge, formatKnowledgeContext } from '../knowledgeUtils';
+import { APP_VERSION } from '../version';
 
 // AbortController for cancelling in-flight requests
 let currentAbortController: AbortController | null = null;
@@ -38,14 +39,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 }) => {
   const [isTyping, setIsTyping] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const updateThrottleRef = useRef<NodeJS.Timeout | null>(null);
   const pendingContentRef = useRef<string>('');
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const scrollToBottom = (smooth = true) => {
-    if (messagesEndRef.current) {
+    if (messagesEndRef.current && shouldAutoScroll) {
       messagesEndRef.current.scrollIntoView({ 
         behavior: smooth ? 'smooth' : 'auto',
         block: 'end'
@@ -53,10 +56,61 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
+  // Check if user is near bottom of scroll container
+  const checkIfNearBottom = (): boolean => {
+    if (!scrollRef.current) return true;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    return distanceFromBottom < 100; // 100px threshold
+  };
+
+  // Handle scroll events to detect user scrolling
   useEffect(() => {
-    const timer = setTimeout(() => scrollToBottom(), 50);
-    return () => clearTimeout(timer);
-  }, [messages, isTyping]);
+    const scrollContainer = scrollRef.current;
+    if (!scrollContainer) return;
+
+    const handleScroll = () => {
+      // Clear any pending scroll timeout
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+
+      // Check if user is near bottom
+      const isNearBottom = checkIfNearBottom();
+      
+      // Use a timeout to debounce scroll detection
+      scrollTimeoutRef.current = setTimeout(() => {
+        setShouldAutoScroll(isNearBottom);
+      }, 150);
+    };
+
+    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      scrollContainer.removeEventListener('scroll', handleScroll);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Auto-scroll when messages change, but only if shouldAutoScroll is true
+  useEffect(() => {
+    if (shouldAutoScroll) {
+      const timer = setTimeout(() => scrollToBottom(), 50);
+      return () => clearTimeout(timer);
+    }
+  }, [messages, isTyping, shouldAutoScroll]);
+
+  // Reset shouldAutoScroll when user manually scrolls to bottom
+  useEffect(() => {
+    if (scrollRef.current && shouldAutoScroll) {
+      // Ensure we're actually at the bottom
+      const isNearBottom = checkIfNearBottom();
+      if (!isNearBottom) {
+        setShouldAutoScroll(false);
+      }
+    }
+  }, [shouldAutoScroll]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -241,6 +295,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
              >
                PROBE 探针
              </button>
+             <button 
+               onClick={() => onModeToggle('THINKING')}
+               className={`px-6 py-2 rounded-full text-[10px] font-bold tracking-widest transition-all ${mode === 'THINKING' ? 'bg-green-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+             >
+               THINKING 思考
+             </button>
+          </div>
+          <div className="px-3 py-1.5 bg-black/40 border border-white/10 rounded-full text-[9px] font-mono text-gray-400">
+            v{APP_VERSION}
           </div>
           {isExtracting && (
             <div className="px-4 py-2 bg-purple-600/20 border border-purple-500/30 rounded-full text-[10px] font-bold text-purple-400 flex items-center gap-2 backdrop-blur-md">
@@ -257,7 +320,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         </div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-20 md:px-12 space-y-8 scroll-smooth">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-20 md:px-12 space-y-8 scroll-smooth relative">
+        {/* "回到最新"按钮 - 当用户不在底部时显示 */}
+        {!shouldAutoScroll && (
+          <button
+            onClick={() => {
+              setShouldAutoScroll(true);
+              scrollToBottom(true);
+            }}
+            className="fixed bottom-24 right-8 z-20 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-full shadow-lg shadow-blue-500/30 flex items-center gap-2 transition-all hover:scale-105"
+            style={{ marginRight: 'calc((100vw - 1280px) / 2)' }}
+          >
+            <i className="fa-solid fa-arrow-down"></i>
+            回到最新
+          </button>
+        )}
         <div className="max-w-4xl mx-auto space-y-10 min-h-full flex flex-col">
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
@@ -300,7 +377,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={mode === 'PROBE' ? "开启深度对话，探索认知边界..." : "随时吩咐，你的数字孪生在这里..."}
+              placeholder={mode === 'PROBE' ? "开启深度对话，探索认知边界..." : mode === 'THINKING' ? "输入想法，开始结构化思考..." : "随时吩咐，你的数字孪生在这里..."}
               className="flex-1 bg-transparent border-none py-4 px-6 text-base focus:outline-none resize-none overflow-hidden placeholder:text-gray-700 leading-relaxed min-h-[56px] flex items-center justify-center align-middle"
               style={{ paddingBottom: '16px', paddingTop: '16px' }}
             />

@@ -3,7 +3,8 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { 
   Memory, MemoryCategory, MemoryLayer, MemoryStatus, 
   InsightProposal, EvolutionRecord, AppSettings, ChatMode,
-  KnowledgeItem, UploadRecord, ConversationSession, ExtractionMode
+  KnowledgeItem, UploadRecord, ConversationSession, ExtractionMode,
+  ThinkingSession, ThinkingNode
 } from './types';
 import Sidebar from './components/Sidebar';
 import MemoryVault from './components/MemoryVault';
@@ -11,6 +12,7 @@ import InsightQueue from './components/InsightQueue';
 import IntentCenter from './components/IntentCenter';
 import EvolutionTimeline from './components/EvolutionTimeline';
 import ChatInterface from './components/ChatInterface';
+import ThinkingInterface from './components/ThinkingInterface';
 import ImportHub from './components/ImportHub';
 import ExportCenter from './components/ExportCenter';
 import SettingsCenter from './components/SettingsCenter';
@@ -20,6 +22,7 @@ import SessionArchive from './components/SessionArchive';
 import { extractInsightsFromChat, extractKnowledgeFromText } from './geminiService';
 import { findSimilarMemories, calculateQualityScore, calculateMergedConfidence } from './memoryUtils';
 import { calculateContentHash, retrieveRelevantKnowledge, formatKnowledgeContext } from './knowledgeUtils';
+import { APP_VERSION } from './version';
 
 // Safe JSON parse with error handling
 const safeJSONParse = <T,>(json: string | null, defaultValue: T): T => {
