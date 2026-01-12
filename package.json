@@ -1,7 +1,7 @@
 {
   "name": "personaengine",
   "private": true,
-  "version": "0.1.0-beta",
+  "version": "1.0.0",
   "description": "一个精密的人格知识与记忆治理系统，通过5层架构、双轨意图和元演进跟踪实现人工智能与人类的对齐",
   "keywords": [
     "ai",
