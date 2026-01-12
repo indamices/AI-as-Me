@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { APP_VERSION } from '../version';
 
 interface SidebarProps {
   activeTab: 'vault' | 'queue' | 'intents' | 'evolution' | 'chat' | 'import' | 'export' | 'settings' | 'knowledge' | 'uploads' | 'sessions';
