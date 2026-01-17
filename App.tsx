@@ -46,8 +46,8 @@ const safeLocalStorageSet = (key: string, value: string): boolean => {
     if (e instanceof DOMException) {
       if (e.name === 'QuotaExceededError') {
         console.error('LocalStorage quota exceeded for key:', key);
-        // Try to clear old data or notify user
-        alert('存储空间不足，请清理一些数据或联系支持。');
+        // Show helpful message with cleanup suggestions
+        alert('存储空间不足！\n\n建议操作：\n1. 删除已拒绝的提案\n2. 清理旧会话记录\n3. 导出数据后清理\n\n或在设置中心使用"清理存储空间"功能');
       } else {
         console.error('LocalStorage error:', e);
       }
@@ -182,8 +182,10 @@ const App: React.FC = () => {
       geminiApiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || '',
       geminiModel: 'gemini-3-pro-preview',
       deepseekKey: '',
-      activeProvider: 'GEMINI' as const,
       deepseekModel: 'deepseek-chat',
+      glmApiKey: '35d69764ebc34827b75b1fe275e1a440.63KnzOkYt5kgUZfp',
+      glmModel: 'glm-4.7',
+      activeProvider: 'GEMINI' as const,
       minConfidenceThreshold: 0.6,
       autoMergeThreshold: 0.85,
       qualityFilterEnabled: true
@@ -365,6 +367,24 @@ const App: React.FC = () => {
     });
 
     setProposals(prev => prev.map(p => p.id === proposal.id ? { ...p, status: 'ACCEPTED' } : p));
+  }, []);
+
+  // Batch accept proposals
+  const handleBatchAccept = useCallback((ids: string[]) => {
+    const proposalsToAccept = proposals.filter(p => ids.includes(p.id) && p.status === 'PENDING');
+    
+    proposalsToAccept.forEach(proposal => {
+      handleAcceptProposal(proposal);
+    });
+  }, [proposals, handleAcceptProposal]);
+
+  // Batch reject proposals
+  const handleBatchReject = useCallback((ids: string[]) => {
+    setProposals(prev => prev.map(p => 
+      ids.includes(p.id) && p.status === 'PENDING' 
+        ? { ...p, status: 'REJECTED' } 
+        : p
+    ));
   }, []);
 
   const handleChatComplete = async (hist: { role: string; content: string }[]) => {
@@ -604,7 +624,9 @@ const App: React.FC = () => {
             <InsightQueue 
             proposals={proposals} 
             onAccept={handleAcceptProposal} 
-            onReject={(id) => setProposals(prev => prev.map(p => p.id === id ? { ...p, status: 'REJECTED' } : p))} 
+            onReject={(id) => setProposals(prev => prev.map(p => p.id === id ? { ...p, status: 'REJECTED' } : p))}
+            onBatchAccept={handleBatchAccept}
+            onBatchReject={handleBatchReject}
           />
           </Suspense>
         )}
@@ -748,7 +770,19 @@ const App: React.FC = () => {
             <SettingsCenter 
             settings={settings} 
             onUpdate={(u) => setSettings(s => ({ ...s, ...u }))} 
-            onClearData={handleClearAllData} 
+            onClearData={handleClearAllData}
+            memories={memories}
+            knowledge={knowledgeItems}
+            sessions={sessions}
+            uploads={uploadRecords}
+            proposals={proposals}
+            history={history}
+            onUpdateMemories={setMemories}
+            onUpdateKnowledge={setKnowledgeItems}
+            onUpdateSessions={setSessions}
+            onUpdateUploads={setUploadRecords}
+            onUpdateProposals={setProposals}
+            onUpdateHistory={setHistory}
           />
           </Suspense>
         )}

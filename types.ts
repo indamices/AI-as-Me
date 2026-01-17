@@ -77,14 +77,16 @@ export interface InsightProposal {
 }
 
 export type ChatMode = 'STANDARD' | 'PROBE';
-export type AIProvider = 'GEMINI' | 'DEEPSEEK';
+export type AIProvider = 'GEMINI' | 'DEEPSEEK' | 'GLM';
 
 export interface AppSettings {
   geminiApiKey: string;        // Gemini API Key
   geminiModel: string;         // Gemini model selection
   deepseekKey: string;
-  activeProvider: AIProvider;
   deepseekModel: string;
+  glmApiKey: string;           // GLM API Key
+  glmModel: string;            // GLM model selection (e.g., 'glm-4.7')
+  activeProvider: AIProvider;
   minConfidenceThreshold: number;  // 最小置信度阈值（0-1）
   autoMergeThreshold: number;  // 自动合并相似度阈值（0-1）
   qualityFilterEnabled: boolean;  // 是否启用质量过滤

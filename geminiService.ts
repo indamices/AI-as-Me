@@ -74,6 +74,30 @@ async function callDeepSeek(settings: AppSettings, messages: any[]) {
   return data.choices[0]?.message?.content || "";
 }
 
+// GLM API implementation (OpenAI compatible)
+async function callGLM(settings: AppSettings, messages: any[]) {
+  const response = await fetchWithTimeout("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${settings.glmApiKey}`
+    },
+    body: JSON.stringify({
+      model: settings.glmModel || "glm-4.7",
+      messages: messages,
+      stream: false
+    })
+  }, DEFAULT_API_TIMEOUT); // 30 seconds for chat
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error(`GLM API error: ${JSON.stringify(error)}`);
+  }
+  
+  const data = await response.json();
+  return data.choices[0]?.message?.content || "";
+}
+
 /**
  * Create optimized Chinese prompt for DeepSeek extraction
  */
@@ -378,6 +402,38 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
       // Re-throw error so caller can handle it
       throw e;
     }
+  } else if (settings.activeProvider === 'GLM') {
+    // GLM path - use optimized Chinese prompt
+    try {
+      if (!settings.glmApiKey) {
+        console.error("[extractInsightsFromChat] GLM API key not configured");
+        throw new Error("GLM API Key 未配置，请在设置页面配置");
+      }
+      const glmPrompt = createDeepSeekExtractionPrompt(
+        history.map(h => `${h.role}: ${h.content}`).join('\n')
+      );
+      console.log('[extractInsightsFromChat] Calling GLM API', { promptLength: glmPrompt.length });
+      const text = await callGLM(settings, [
+        {
+          role: "system",
+          content: `你是一个专业的认知科学分析助手。你的任务是分析对话内容并提取用户记忆。
+你必须严格按照要求的 JSON 格式输出，不要添加任何解释性文字。
+如果无法提取有效记忆，返回空数组 []。
+确保输出的 JSON 格式完全正确，可以直接被解析。`
+        },
+        {
+          role: "user",
+          content: glmPrompt
+        }
+      ]);
+      console.log('[extractInsightsFromChat] GLM response received', { textLength: text?.length || 0 });
+      const results = parseDeepSeekJSON(text);
+      console.log('[extractInsightsFromChat] GLM results parsed', { resultsCount: results?.length || 0 });
+      return results;
+    } catch (e) {
+      console.error("[extractInsightsFromChat] GLM extraction failed:", e);
+      throw e;
+    }
   } else {
     // DeepSeek path - use optimized Chinese prompt
     try {
@@ -417,7 +473,46 @@ async function parseImaConversationsBatchSingle(text: string, settings?: AppSett
     hasDeepseekKey: !!settings?.deepseekKey
   });
 
-  if (activeProvider === 'DEEPSEEK') {
+  if (activeProvider === 'GLM') {
+    // GLM path - use optimized Chinese prompt
+    try {
+      if (!settings?.glmApiKey) {
+        console.error("[parseImaConversationsBatch] GLM API key not configured");
+        throw new Error("GLM API Key 未配置，请在设置页面配置");
+      }
+      
+      const glmPrompt = createDeepSeekExtractionPrompt(text);
+      const text_result = await callGLM(settings, [
+        {
+          role: "system",
+          content: `你是一个专业的认知科学分析助手。你的任务是分析对话内容并提取用户记忆。
+你必须严格按照要求的 JSON 格式输出，不要添加任何解释性文字。
+如果无法提取有效记忆，返回空数组 []。
+确保输出的 JSON 格式完全正确，可以直接被解析。`
+        },
+        {
+          role: "user",
+          content: glmPrompt
+        }
+      ]);
+      
+      const results = parseDeepSeekJSON(text_result);
+      return results.map((r: any) => ({
+        ...r,
+        confidence: r.confidence ?? 0.7,
+        evidenceStrength: r.evidenceStrength ?? 0.6,
+        qualityIndicators: {
+          generalization: r.qualityIndicators?.generalization ?? 0.6,
+          specificity: r.qualityIndicators?.specificity ?? 0.6,
+          consistency: r.qualityIndicators?.consistency ?? 0.7,
+          ...r.qualityIndicators
+        }
+      }));
+    } catch (e) {
+      console.error("[parseImaConversationsBatch] GLM batch conversation parse failed:", e);
+      throw e;
+    }
+  } else if (activeProvider === 'DEEPSEEK') {
     // DeepSeek path - use optimized Chinese prompt
     try {
       if (!settings?.deepseekKey) {
@@ -526,6 +621,8 @@ export const parseImaConversationsBatch = async (text: string, settings?: AppSet
   const activeProvider = settings?.activeProvider || 'GEMINI';
   const model = activeProvider === 'GEMINI' 
     ? (settings?.geminiModel || 'gemini-3-pro-preview')
+    : activeProvider === 'GLM'
+    ? (settings?.glmModel || 'glm-4.7')
     : (settings?.deepseekModel || 'deepseek-chat');
   
   console.log('[parseImaConversationsBatch] Starting', {
@@ -683,6 +780,63 @@ ${knowledgeContext ? `\n[相关知识库]：\n${knowledgeContext}` : ''}
       console.error("Gemini streaming failed:", e);
       yield "认知链路异常。";
     }
+  } else if (settings.activeProvider === 'GLM') {
+    // GLM streaming
+    try {
+      const msgs = [{ role: "system", content: systemInstruction }, ...history, { role: "user", content: message }];
+      const response = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${settings.glmApiKey}`
+        },
+        body: JSON.stringify({
+          model: settings.glmModel || "glm-4.7",
+          messages: msgs,
+          stream: true
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`GLM API error: ${response.statusText}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      if (!reader) {
+        throw new Error("Failed to get response reader");
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+            try {
+              const json = JSON.parse(data);
+              const content = json.choices?.[0]?.delta?.content;
+              if (content) {
+                yield content;
+              }
+            } catch (e) {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("GLM streaming failed:", e);
+      yield "GLM 链路异常。";
+    }
   } else {
     // DeepSeek streaming
     try {
@@ -801,11 +955,22 @@ ${knowledgeContext ? `\n[相关知识库]：\n${knowledgeContext}` : ''}
       console.error("Gemini agent response failed:", e);
       return "认知链路异常。"; 
     }
+  } else if (settings.activeProvider === 'GLM') {
+    try {
+      const msgs = [{ role: "system", content: systemInstruction }, ...history, { role: "user", content: message }];
+      return await callGLM(settings, msgs);
+    } catch (e) {
+      console.error("GLM agent response failed:", e);
+      return "GLM 链路异常。";
+    }
   } else {
     try {
       const msgs = [{ role: "system", content: systemInstruction }, ...history, { role: "user", content: message }];
       return await callDeepSeek(settings, msgs);
-    } catch (e) {       return "DeepSeek 链路异常。"; }
+    } catch (e) {
+      console.error("DeepSeek agent response failed:", e);
+      return "DeepSeek 链路异常。";
+    }
   }
 };
 

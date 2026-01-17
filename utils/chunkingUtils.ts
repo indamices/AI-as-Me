@@ -19,6 +19,11 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   'deepseek-chat': 25000,              // ~64K tokens (~25K 字符)
   'deepseek-reasoner': 25000,          // ~64K tokens
   
+  // GLM 模型
+  'glm-4.7': 200000,                   // ~512K tokens (~200K 字符，保守估计)
+  'glm-4': 200000,                     // GLM-4 系列
+  'glm-3': 128000,                     // GLM-3 系列 (~128K tokens)
+  
   // 默认值（保守）
   'default': 20000                     // 默认 20K 字符
 };
@@ -46,6 +51,12 @@ export function getModelContextLimit(modelName: string | undefined): number {
   }
   if (modelName.includes('deepseek')) {
     return MODEL_CONTEXT_LIMITS['deepseek-chat'];
+  }
+  if (modelName.includes('glm-4.7') || modelName.includes('glm-4')) {
+    return MODEL_CONTEXT_LIMITS['glm-4.7'];
+  }
+  if (modelName.includes('glm-3')) {
+    return MODEL_CONTEXT_LIMITS['glm-3'];
   }
   
   return MODEL_CONTEXT_LIMITS['default'];

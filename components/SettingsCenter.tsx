@@ -1,17 +1,49 @@
 
-import React, { useState, useMemo } from 'react';
-import { AppSettings, AIProvider } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { AppSettings, AIProvider, Memory, KnowledgeItem, ConversationSession, UploadRecord, InsightProposal, EvolutionRecord } from '../types';
+import { estimateStorageUsage, cleanupStorage, StorageCleanupOptions } from '../utils/storageUtils';
+import { getStorageManager, migrateStorage, StorageBackend } from '../utils/storageAdapter';
 
 interface SettingsCenterProps {
   settings: AppSettings;
   onUpdate: (updates: Partial<AppSettings>) => void;
   onClearData: () => void;
+  // Storage data for usage display and cleanup
+  memories?: Memory[];
+  knowledge?: KnowledgeItem[];
+  sessions?: ConversationSession[];
+  uploads?: UploadRecord[];
+  proposals?: InsightProposal[];
+  history?: EvolutionRecord[];
+  // Callbacks for updating data after cleanup
+  onUpdateMemories?: (memories: Memory[]) => void;
+  onUpdateKnowledge?: (knowledge: KnowledgeItem[]) => void;
+  onUpdateSessions?: (sessions: ConversationSession[]) => void;
+  onUpdateUploads?: (uploads: UploadRecord[]) => void;
+  onUpdateProposals?: (proposals: InsightProposal[]) => void;
+  onUpdateHistory?: (history: EvolutionRecord[]) => void;
 }
 
 // Configuration status type
 type ConfigStatus = 'valid' | 'incomplete' | 'invalid';
 
-const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onClearData }) => {
+const SettingsCenter: React.FC<SettingsCenterProps> = ({ 
+  settings, 
+  onUpdate, 
+  onClearData,
+  memories = [],
+  knowledge = [],
+  sessions = [],
+  uploads = [],
+  proposals = [],
+  history = [],
+  onUpdateMemories,
+  onUpdateKnowledge,
+  onUpdateSessions,
+  onUpdateUploads,
+  onUpdateProposals,
+  onUpdateHistory
+}) => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingProvider, setPendingProvider] = useState<AIProvider | null>(null);
   const [isApplying, setIsApplying] = useState(false);
@@ -19,11 +51,23 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
+  
+  // Storage management state
+  const [storageUsage, setStorageUsage] = useState<{ total: number; quota: number | null; breakdown: string } | null>(null);
+  const [storageBackend, setStorageBackend] = useState<StorageBackend>('localStorage');
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [isMigrating, setIsMigrating] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState<{ success: boolean; freedSpace?: number; message: string } | null>(null);
 
   // Calculate configuration status
   const configStatus = useMemo<ConfigStatus>(() => {
     if (settings.activeProvider === 'GEMINI') {
       if (!settings.geminiApiKey || settings.geminiApiKey.trim().length === 0) {
+        return 'incomplete';
+      }
+      return 'valid';
+    } else if (settings.activeProvider === 'GLM') {
+      if (!settings.glmApiKey || settings.glmApiKey.trim().length === 0) {
         return 'incomplete';
       }
       return 'valid';
@@ -37,9 +81,13 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
 
   // Get current model name
   const currentModel = useMemo(() => {
-    return settings.activeProvider === 'GEMINI' 
-      ? (settings.geminiModel || 'gemini-3-pro-preview')
-      : (settings.deepseekModel || 'deepseek-chat');
+    if (settings.activeProvider === 'GEMINI') {
+      return settings.geminiModel || 'gemini-3-pro-preview';
+    } else if (settings.activeProvider === 'GLM') {
+      return settings.glmModel || 'glm-4.7';
+    } else {
+      return settings.deepseekModel || 'deepseek-chat';
+    }
   }, [settings]);
 
   // Handle provider selection with confirmation
@@ -103,6 +151,19 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
         } else {
           setTestResult({ success: false, message: 'Gemini API Key 格式无效' });
         }
+      } else if (settings.activeProvider === 'GLM') {
+        if (!settings.glmApiKey || settings.glmApiKey.trim().length === 0) {
+          setTestResult({ success: false, message: 'GLM API Key 未配置' });
+          setTestingConnection(false);
+          return;
+        }
+        // Test GLM connection
+        const isValidFormat = settings.glmApiKey.length > 20;
+        if (isValidFormat) {
+          setTestResult({ success: true, message: 'GLM API Key 格式有效' });
+        } else {
+          setTestResult({ success: false, message: 'GLM API Key 格式无效' });
+        }
       } else {
         if (!settings.deepseekKey || settings.deepseekKey.trim().length === 0) {
           setTestResult({ success: false, message: 'DeepSeek API Key 未配置' });
@@ -143,6 +204,133 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
       case 'invalid': return '配置错误';
     }
   };
+
+  // Load storage backend and usage
+  useEffect(() => {
+    const loadStorageInfo = async () => {
+      const manager = getStorageManager();
+      const backend = manager.getBackend();
+      setStorageBackend(backend);
+
+      try {
+        const quota = await manager.estimateQuota();
+        const usage = await manager.getUsage();
+        const estimatedUsage = estimateStorageUsage({
+          memories,
+          knowledge,
+          sessions,
+          uploads,
+          proposals,
+          history
+        });
+
+        setStorageUsage({
+          total: usage || estimatedUsage.total,
+          quota: quota,
+          breakdown: estimatedUsage.breakdown
+        });
+      } catch (error) {
+        console.error('Error loading storage info:', error);
+      }
+    };
+
+    loadStorageInfo();
+  }, [memories, knowledge, sessions, uploads, proposals, history]);
+
+  // Handle storage cleanup
+  const handleCleanupStorage = async () => {
+    if (!confirm('确定要清理存储空间吗？这将删除旧的会话、历史记录和已拒绝的提案。')) {
+      return;
+    }
+
+    setIsCleaning(true);
+    setCleanupResult(null);
+
+    try {
+      const result = cleanupStorage(
+        { memories, knowledge, sessions, uploads, proposals, history },
+        {
+          keepRecentSessions: 50,
+          keepRecentHistory: 100,
+          keepRecentUploads: 30,
+          autoDeleteRejectedProposals: 7
+        }
+      );
+
+      // Update data using callbacks
+      if (onUpdateMemories) onUpdateMemories(result.cleanedData.memories);
+      if (onUpdateKnowledge) onUpdateKnowledge(result.cleanedData.knowledge);
+      if (onUpdateSessions) onUpdateSessions(result.cleanedData.sessions);
+      if (onUpdateUploads) onUpdateUploads(result.cleanedData.uploads);
+      if (onUpdateProposals) onUpdateProposals(result.cleanedData.proposals);
+      if (onUpdateHistory) onUpdateHistory(result.cleanedData.history);
+
+      const originalUsage = estimateStorageUsage({ memories, knowledge, sessions, uploads, proposals, history });
+      const newUsage = estimateStorageUsage(result.cleanedData);
+      const freedSpace = originalUsage.total - newUsage.total;
+
+      setCleanupResult({
+        success: true,
+        freedSpace,
+        message: `清理完成！释放了 ${formatBytes(freedSpace)} 空间。`
+      });
+
+      // Update storage usage display
+      setTimeout(() => {
+        window.location.reload(); // Reload to refresh storage usage
+      }, 2000);
+    } catch (error) {
+      setCleanupResult({
+        success: false,
+        message: `清理失败：${error instanceof Error ? error.message : '未知错误'}`
+      });
+    } finally {
+      setIsCleaning(false);
+      setTimeout(() => setCleanupResult(null), 5000);
+    }
+  };
+
+  // Handle storage backend migration
+  const handleMigrateStorage = async (targetBackend: StorageBackend) => {
+    if (!confirm(`确定要迁移到 ${targetBackend} 吗？这将复制所有数据到新的存储后端。`)) {
+      return;
+    }
+
+    setIsMigrating(true);
+
+    try {
+      const result = await migrateStorage(storageBackend, targetBackend);
+      
+      if (result.success) {
+        const manager = getStorageManager();
+        await manager.switchBackend(targetBackend);
+        localStorage.setItem('__storage_backend__', targetBackend);
+        setStorageBackend(targetBackend);
+        
+        alert(`迁移成功！已将 ${result.migratedKeys.length} 项数据迁移到 ${targetBackend}。\n\n页面将重新加载以应用更改。`);
+        window.location.reload();
+      } else {
+        alert(`迁移失败：${result.error || '未知错误'}`);
+      }
+    } catch (error) {
+      alert(`迁移失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsMigrating(false);
+    }
+  };
+
+  // Format bytes to human-readable format
+  const formatBytes = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
+  // Calculate storage percentage
+  const storagePercentage = useMemo(() => {
+    if (!storageUsage || !storageUsage.quota) return null;
+    return Math.round((storageUsage.total / storageUsage.quota) * 100);
+  }, [storageUsage]);
   return (
     <div className="flex-1 p-8 overflow-y-auto bg-black/40">
       <header className="mb-10">
@@ -165,6 +353,8 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
                   <div className={`px-4 py-2 rounded-xl bg-white/10 border ${
                     settings.activeProvider === 'GEMINI' 
                       ? 'border-blue-500/50 bg-blue-500/10' 
+                      : settings.activeProvider === 'GLM'
+                      ? 'border-green-500/50 bg-green-500/10'
                       : 'border-purple-500/50 bg-purple-500/10'
                   }`}>
                     <span className="font-bold text-lg tracking-widest text-white">
@@ -183,13 +373,19 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
                   <div className="mt-4 p-4 bg-black/30 rounded-xl border border-white/5 space-y-2 text-xs">
                     <div className="flex items-center justify-between">
                       <span className="text-gray-500">API Key:</span>
-                      <span className={settings.activeProvider === 'GEMINI' 
-                        ? (settings.geminiApiKey ? 'text-green-400' : 'text-yellow-400')
-                        : (settings.deepseekKey ? 'text-green-400' : 'text-yellow-400')
+                      <span className={
+                        settings.activeProvider === 'GEMINI' 
+                          ? (settings.geminiApiKey ? 'text-green-400' : 'text-yellow-400')
+                          : settings.activeProvider === 'GLM'
+                          ? (settings.glmApiKey ? 'text-green-400' : 'text-yellow-400')
+                          : (settings.deepseekKey ? 'text-green-400' : 'text-yellow-400')
                       }>
-                        {settings.activeProvider === 'GEMINI' 
-                          ? (settings.geminiApiKey ? '✓ 已配置' : '⚠ 未配置')
-                          : (settings.deepseekKey ? '✓ 已配置' : '⚠ 未配置')
+                        {
+                          settings.activeProvider === 'GEMINI' 
+                            ? (settings.geminiApiKey ? '✓ 已配置' : '⚠ 未配置')
+                            : settings.activeProvider === 'GLM'
+                            ? (settings.glmApiKey ? '✓ 已配置' : '⚠ 未配置')
+                            : (settings.deepseekKey ? '✓ 已配置' : '⚠ 未配置')
                         }
                       </span>
                     </div>
@@ -271,11 +467,13 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
             模型提供商选择
           </h3>
           
-          <div className="grid grid-cols-2 gap-4 mb-8">
-            {(['GEMINI', 'DEEPSEEK'] as AIProvider[]).map(p => {
+          <div className="grid grid-cols-3 gap-4 mb-8">
+            {(['GEMINI', 'GLM', 'DEEPSEEK'] as AIProvider[]).map(p => {
               const isActive = settings.activeProvider === p;
               const providerConfigStatus = p === 'GEMINI' 
                 ? (settings.geminiApiKey ? 'valid' : 'incomplete')
+                : p === 'GLM'
+                ? (settings.glmApiKey ? 'valid' : 'incomplete')
                 : (settings.deepseekKey ? 'valid' : 'incomplete');
               
               return (
@@ -298,7 +496,7 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
                     
                     {/* Provider icon */}
                     <div className={`relative z-10 transition-transform ${isActive ? 'scale-110' : 'group-hover:scale-105'}`}>
-                      <i className={`fa-solid ${p === 'GEMINI' ? 'fa-gem' : 'fa-robot'} text-3xl ${isActive ? 'drop-shadow-lg' : ''}`}></i>
+                      <i className={`fa-solid ${p === 'GEMINI' ? 'fa-gem' : p === 'GLM' ? 'fa-brain' : 'fa-robot'} text-3xl ${isActive ? 'drop-shadow-lg' : ''}`}></i>
                     </div>
                     
                     {/* Provider name */}
@@ -316,12 +514,17 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
                   
                   {/* Description */}
                   <div className={`text-[10px] text-center px-2 transition-colors ${
-                    isActive ? 'text-blue-400' : 'text-gray-600'
+                    isActive ? (p === 'GEMINI' ? 'text-blue-400' : p === 'GLM' ? 'text-green-400' : 'text-purple-400') : 'text-gray-600'
                   }`}>
                     {p === 'GEMINI' ? (
                       <>
                         <div className="font-bold mb-1">支持结构化输出</div>
                         <div>自动 JSON 验证，高质量提取</div>
+                      </>
+                    ) : p === 'GLM' ? (
+                      <>
+                        <div className="font-bold mb-1">国产模型</div>
+                        <div>GLM-4.7，性能优秀</div>
                       </>
                     ) : (
                       <>
@@ -343,6 +546,7 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
                 <p className="font-bold text-blue-400 mb-2">模型选择建议：</p>
                 <ul className="space-y-1 list-disc list-inside">
                   <li><strong>Gemini</strong>：支持结构化 JSON 输出，自动验证格式，适合复杂推理任务，提取质量更高</li>
+                  <li><strong>GLM</strong>：国产模型，GLM-4.7 性能优秀，支持长上下文，适合中文场景</li>
                   <li><strong>DeepSeek</strong>：性价比高，对中文理解好，但需要更详细的提示词，输出需要额外解析验证</li>
                 </ul>
               </div>
@@ -380,6 +584,37 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
                     {settings.geminiModel === 'gemini-2.0-flash-exp' && '实验性模型，可能不稳定'}
                     {settings.geminiModel === 'gemini-1.5-pro' && '稳定可靠，适合生产环境'}
                     {settings.geminiModel === 'gemini-1.5-flash' && '快速处理，适合批量任务'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* GLM Configuration */}
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">GLM API Key</label>
+              <input 
+                type="password"
+                value={settings.glmApiKey || ''}
+                onChange={(e) => onUpdate({ glmApiKey: e.target.value })}
+                placeholder="在此粘贴你的 GLM API Key..."
+                className="w-full bg-black/40 border border-white/10 rounded-xl py-4 px-6 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/40 transition-all font-mono"
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-gray-600 italic">官方网址: open.bigmodel.cn</span>
+                <div className="flex flex-col gap-1">
+                  <select
+                    value={settings.glmModel || 'glm-4.7'}
+                    onChange={(e) => onUpdate({ glmModel: e.target.value })}
+                    className="bg-black/40 border border-white/10 rounded-lg py-2 px-3 text-xs text-gray-300 focus:outline-none focus:ring-2 focus:ring-green-500/40"
+                  >
+                    <option value="glm-4.7">glm-4.7 - 最新版本，性能优秀</option>
+                    <option value="glm-4">glm-4 - 稳定版本，可靠</option>
+                    <option value="glm-3-turbo">glm-3-turbo - 快速版本，性价比高</option>
+                  </select>
+                  <p className="text-[9px] text-gray-600 italic">
+                    {settings.glmModel === 'glm-4.7' && '推荐：最新模型，性能优秀，支持长上下文'}
+                    {settings.glmModel === 'glm-4' && '推荐：稳定可靠，适合生产环境'}
+                    {settings.glmModel === 'glm-3-turbo' && '推荐：快速响应，适合实时对话'}
                   </p>
                 </div>
               </div>
@@ -485,6 +720,177 @@ const SettingsCenter: React.FC<SettingsCenterProps> = ({ settings, onUpdate, onC
                 <p className="text-xs text-gray-500 mt-2">相似度超过此阈值的提案将自动合并到现有记忆</p>
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* Storage Management Section */}
+        <section className="glass-panel p-8 rounded-3xl border border-white/10 shadow-2xl">
+          <h3 className="text-xl font-bold mb-6 flex items-center gap-3">
+            <i className="fa-solid fa-database text-cyan-400"></i>
+            存储空间管理
+          </h3>
+
+          {/* Storage Usage Display */}
+          {storageUsage && (
+            <div className="mb-6 space-y-4">
+              <div className="p-4 bg-white/5 rounded-xl border border-white/10">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm font-bold text-gray-300">存储使用情况</span>
+                  <span className={`text-xs font-bold px-3 py-1 rounded-lg ${
+                    storagePercentage && storagePercentage > 80 
+                      ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                      : storagePercentage && storagePercentage > 50
+                      ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                      : 'bg-green-500/20 text-green-400 border border-green-500/30'
+                  }`}>
+                    {storagePercentage !== null ? `${storagePercentage}%` : 'N/A'}
+                  </span>
+                </div>
+                
+                {/* Progress Bar */}
+                {storagePercentage !== null && (
+                  <div className="w-full h-3 bg-white/5 rounded-full overflow-hidden mb-3">
+                    <div 
+                      className={`h-full transition-all duration-500 ${
+                        storagePercentage > 80 
+                          ? 'bg-gradient-to-r from-red-500 to-red-600'
+                          : storagePercentage > 50
+                          ? 'bg-gradient-to-r from-yellow-500 to-yellow-600'
+                          : 'bg-gradient-to-r from-green-500 to-green-600'
+                      }`}
+                      style={{ width: `${Math.min(storagePercentage, 100)}%` }}
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">已使用</span>
+                    <span className="text-gray-300 font-mono">{formatBytes(storageUsage.total)}</span>
+                  </div>
+                  {storageUsage.quota && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400">总配额</span>
+                      <span className="text-gray-300 font-mono">{formatBytes(storageUsage.quota)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                    <span className="text-gray-400">数据分布</span>
+                    <span className="text-gray-500 text-[10px]">{storageUsage.breakdown}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Storage Backend Selection */}
+          <div className="mb-6 p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-server text-blue-400"></i>
+                <span className="text-sm font-bold text-gray-300">存储后端</span>
+              </div>
+              <span className={`text-xs font-bold px-3 py-1 rounded-lg ${
+                storageBackend === 'indexedDB'
+                  ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                  : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+              }`}>
+                {storageBackend === 'indexedDB' ? 'IndexedDB' : 'LocalStorage'}
+              </span>
+            </div>
+            <p className="text-xs text-gray-400 mb-3">
+              {storageBackend === 'indexedDB' 
+                ? '使用 IndexedDB 存储，配额更大（数百MB到几GB）'
+                : '使用 LocalStorage 存储，配额较小（通常 5-10MB）'}
+            </p>
+            <div className="flex gap-2">
+              {storageBackend === 'localStorage' && (
+                <button
+                  onClick={() => handleMigrateStorage('indexedDB')}
+                  disabled={isMigrating}
+                  className="flex-1 py-2 px-4 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-400 font-bold text-xs hover:bg-blue-600/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {isMigrating ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-blue-400/30 border-t-blue-400 rounded-full animate-spin"></div>
+                      <span>迁移中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="fa-solid fa-arrow-up"></i>
+                      <span>迁移到 IndexedDB</span>
+                    </>
+                  )}
+                </button>
+              )}
+              {storageBackend === 'indexedDB' && (
+                <button
+                  onClick={() => handleMigrateStorage('localStorage')}
+                  disabled={isMigrating}
+                  className="flex-1 py-2 px-4 rounded-lg bg-yellow-600/20 border border-yellow-500/30 text-yellow-400 font-bold text-xs hover:bg-yellow-600/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {isMigrating ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-yellow-400/30 border-t-yellow-400 rounded-full animate-spin"></div>
+                      <span>迁移中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="fa-solid fa-arrow-down"></i>
+                      <span>迁移回 LocalStorage</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Cleanup Actions */}
+          <div className="space-y-3">
+            <button
+              onClick={handleCleanupStorage}
+              disabled={isCleaning}
+              className="w-full py-4 rounded-2xl bg-cyan-600/10 border border-cyan-500/30 text-cyan-400 font-bold text-sm hover:bg-cyan-600/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {isCleaning ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin"></div>
+                  <span>清理中...</span>
+                </>
+              ) : (
+                <>
+                  <i className="fa-solid fa-broom"></i>
+                  <span>清理存储空间</span>
+                </>
+              )}
+            </button>
+
+            {/* Cleanup Result */}
+            {cleanupResult && (
+              <div className={`p-4 rounded-xl border ${
+                cleanupResult.success 
+                  ? 'bg-green-500/10 border-green-500/30' 
+                  : 'bg-red-500/10 border-red-500/30'
+              } animate-in fade-in slide-in-from-top-2 duration-300`}>
+                <div className="flex items-center gap-2">
+                  <i className={`fa-solid ${cleanupResult.success ? 'fa-check-circle' : 'fa-exclamation-circle'} ${
+                    cleanupResult.success ? 'text-green-400' : 'text-red-400'
+                  }`}></i>
+                  <div className="flex-1">
+                    <span className={`text-sm font-medium ${
+                      cleanupResult.success ? 'text-green-300' : 'text-red-300'
+                    }`}>
+                      {cleanupResult.message}
+                    </span>
+                    {cleanupResult.freedSpace !== undefined && cleanupResult.success && (
+                      <div className="text-xs text-green-400 mt-1">
+                        释放空间：{formatBytes(cleanupResult.freedSpace)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
