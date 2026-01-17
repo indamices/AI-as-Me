@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { MemoryCategory, AppSettings, KnowledgeType } from './types';
+import { chunkText, shouldChunk, getModelContextLimit, mergeExtractionResults } from './utils/chunkingUtils';
 
 // The categories used for enum validation in responseSchema
 const CATEGORY_ENUM = ['GOAL', 'PREFERENCE', 'HABIT', 'BOUNDARY', 'VALUE', 'PROJECT', 'PEOPLE'];
@@ -314,13 +315,7 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
       hasApiKey: !!apiKey,
       provider: settings.activeProvider
     });
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:298',message:'Gemini API key check',data:{hasApiKey:!!apiKey,hasSettingsKey:!!settings.geminiApiKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
     if (!apiKey) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:300',message:'Gemini API key missing',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       console.error("[extractInsightsFromChat] Gemini API key not configured");
       throw new Error("Gemini API Key 未配置，请在设置页面配置");
     }
@@ -328,9 +323,6 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
     try {
       const model = settings.geminiModel || 'gemini-3-pro-preview';
       console.log('[extractInsightsFromChat] Calling Gemini API', { model, promptLength: prompt.length });
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:304',message:'Calling Gemini API',data:{model,promptLength:prompt.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       const response = await withTimeout(
         ai.models.generateContent({
           model, // Use model from settings
@@ -367,15 +359,8 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
         EXTRACTION_TIMEOUT,
         `Gemini API 调用超时（${EXTRACTION_TIMEOUT / 1000}秒）`
       );
-      // Correct extraction: use .text property
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:338',message:'Gemini API response received',data:{hasText:!!response.text,textLength:response.text?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       const results = JSON.parse(response.text || '[]');
       console.log('[extractInsightsFromChat] Gemini API response parsed', { resultsCount: results?.length || 0 });
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:339',message:'Parsed Gemini results',data:{resultsCount:results?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       // 确保所有结果都有默认值
       return results.map((r: any) => ({
         ...r,
@@ -389,9 +374,6 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
         }
       }));
     } catch (e) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:352',message:'Gemini extraction failed',data:{error: e instanceof Error ? e.message : String(e),errorName: e instanceof Error ? e.name : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       console.error("[extractInsightsFromChat] Gemini extraction failed:", e);
       // Re-throw error so caller can handle it
       throw e;
@@ -399,13 +381,7 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
   } else {
     // DeepSeek path - use optimized Chinese prompt
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:357',message:'DeepSeek path',data:{hasDeepseekKey:!!settings.deepseekKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       if (!settings.deepseekKey) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:359',message:'DeepSeek API key missing',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
         console.error("[extractInsightsFromChat] DeepSeek API key not configured");
         throw new Error("DeepSeek API Key 未配置，请在设置页面配置");
       }
@@ -413,25 +389,13 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
         history.map(h => `${h.role}: ${h.content}`).join('\n')
       );
       console.log('[extractInsightsFromChat] Calling DeepSeek API', { promptLength: deepSeekPrompt.length });
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:366',message:'Calling DeepSeek API',data:{promptLength:deepSeekPrompt.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       const text = await callDeepSeekForExtraction(settings, deepSeekPrompt);
       console.log('[extractInsightsFromChat] DeepSeek response received', { textLength: text?.length || 0 });
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:367',message:'DeepSeek response received',data:{textLength:text?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       const results = parseDeepSeekJSON(text);
       console.log('[extractInsightsFromChat] DeepSeek results parsed', { resultsCount: results?.length || 0 });
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:368',message:'Parsed DeepSeek results',data:{resultsCount:results?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       // Results are already validated and cleaned by parseDeepSeekJSON
       return results;
     } catch (e) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:371',message:'DeepSeek extraction failed',data:{error: e instanceof Error ? e.message : String(e),errorName: e instanceof Error ? e.name : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       console.error("[extractInsightsFromChat] DeepSeek extraction failed:", e);
       // Re-throw error so caller can handle it
       throw e;
@@ -440,16 +404,13 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
 };
 
 /**
- * Batch parse external conversation records
+ * Batch parse external conversation records (single chunk)
  */
-export const parseImaConversationsBatch = async (text: string, settings?: AppSettings) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:416',message:'parseImaConversationsBatch entry',data:{textLength:text.length,activeProvider:settings?.activeProvider||'GEMINI',hasGeminiKey:!!settings?.geminiApiKey,hasDeepseekKey:!!settings?.deepseekKey,hasEnvKey:!!(process.env.API_KEY||process.env.GEMINI_API_KEY)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
+async function parseImaConversationsBatchSingle(text: string, settings?: AppSettings): Promise<any[]> {
   // Check which provider to use
   const activeProvider = settings?.activeProvider || 'GEMINI';
   
-  console.log('[parseImaConversationsBatch] Starting', {
+  console.log('[parseImaConversationsBatchSingle] Processing chunk', {
     provider: activeProvider,
     textLength: text.length,
     hasGeminiKey: !!settings?.geminiApiKey,
@@ -493,23 +454,14 @@ ${text}`;
 
     // Use API key from settings only (no process.env in browser)
     const apiKey = settings?.geminiApiKey;
-    console.log('[parseImaConversationsBatch] Gemini API key check', { hasApiKey: !!apiKey });
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:454',message:'Gemini API key check for batch',data:{hasApiKey:!!apiKey,hasSettingsKey:!!settings?.geminiApiKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
+    console.log('[parseImaConversationsBatchSingle] Gemini API key check', { hasApiKey: !!apiKey });
     if (!apiKey) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:456',message:'Gemini API key missing for batch',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
-      console.error("[parseImaConversationsBatch] Gemini API key not configured");
+      console.error("[parseImaConversationsBatchSingle] Gemini API key not configured");
       throw new Error("Gemini API Key 未配置，请在设置页面配置");
     }
     const ai = new GoogleGenAI({ apiKey });
     try {
       const model = settings?.geminiModel || 'gemini-3-pro-preview';
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:461',message:'Calling Gemini API for batch',data:{model,promptLength:prompt.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       const response = await withTimeout(
         ai.models.generateContent({
           model, // Use model from settings
@@ -546,13 +498,7 @@ ${text}`;
         EXTRACTION_TIMEOUT,
         `Gemini API 调用超时（${EXTRACTION_TIMEOUT / 1000}秒）`
       );
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:528',message:'Gemini batch response received',data:{hasText:!!response.text,textLength:response.text?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       const results = JSON.parse(response.text || '[]');
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:495',message:'Parsed batch results',data:{resultsCount:results?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       // 确保所有结果都有默认值
       return results.map((r: any) => ({
         ...r,
@@ -566,13 +512,74 @@ ${text}`;
         }
       }));
     } catch (e) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:507',message:'Gemini batch parse failed',data:{error: e instanceof Error ? e.message : String(e),errorName: e instanceof Error ? e.name : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-      console.error("[parseImaConversationsBatch] Gemini batch conversation parse failed:", e);
+      console.error("[parseImaConversationsBatchSingle] Gemini batch conversation parse failed:", e);
       throw e;
     }
   }
+}
+
+/**
+ * Batch parse external conversation records with chunking support
+ */
+export const parseImaConversationsBatch = async (text: string, settings?: AppSettings) => {
+  // Check which provider to use
+  const activeProvider = settings?.activeProvider || 'GEMINI';
+  const model = activeProvider === 'GEMINI' 
+    ? (settings?.geminiModel || 'gemini-3-pro-preview')
+    : (settings?.deepseekModel || 'deepseek-chat');
+  
+  console.log('[parseImaConversationsBatch] Starting', {
+    provider: activeProvider,
+    textLength: text.length,
+    hasGeminiKey: !!settings?.geminiApiKey,
+    hasDeepseekKey: !!settings?.deepseekKey
+  });
+  
+  // Check if chunking is needed
+  if (!shouldChunk(text, model)) {
+    // Process as single chunk
+    return await parseImaConversationsBatchSingle(text, settings);
+  }
+  
+  // Need chunking - split text intelligently
+  const contextLimit = getModelContextLimit(model);
+  const chunks = chunkText(text, contextLimit);
+  
+  console.log(`[parseImaConversationsBatch] 文档超长，将分为 ${chunks.length} 块处理`, {
+    totalLength: text.length,
+    chunkCount: chunks.length,
+    avgChunkSize: Math.round(text.length / chunks.length),
+    modelContextLimit: contextLimit
+  });
+  
+  const allResults: any[] = [];
+  
+  // Process chunks sequentially (to avoid API rate limits)
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    console.log(`[parseImaConversationsBatch] 处理第 ${i + 1}/${chunks.length} 块`, {
+      chunkIndex: chunk.chunkIndex,
+      chunkLength: chunk.text.length,
+      progress: `${Math.round(((i + 1) / chunks.length) * 100)}%`
+    });
+    
+    try {
+      const chunkResults = await parseImaConversationsBatchSingle(chunk.text, settings);
+      allResults.push(chunkResults);
+    } catch (error) {
+      console.error(`[parseImaConversationsBatch] 第 ${i + 1} 块处理失败:`, error);
+      // Continue processing other chunks, don't abort entire process
+    }
+  }
+  
+  // Merge results and remove duplicates
+  const merged = mergeExtractionResults(allResults);
+  console.log(`[parseImaConversationsBatch] 分块处理完成`, {
+    totalChunks: chunks.length,
+    mergedResults: merged.length
+  });
+  
+  return merged;
 };
 
 /**
@@ -857,9 +864,9 @@ ${text}
 }
 
 /**
- * Extract knowledge items from text
+ * Extract knowledge items from text (single chunk)
  */
-export async function extractKnowledgeFromText(
+async function extractKnowledgeFromTextSingle(
   text: string,
   settings: AppSettings
 ): Promise<Array<{
@@ -869,36 +876,25 @@ export async function extractKnowledgeFromText(
   tags: string[];
   summary: string;
 }>> {
-  console.log('[extractKnowledgeFromText] Starting', {
+  console.log('[extractKnowledgeFromTextSingle] Processing chunk', {
     provider: settings.activeProvider,
     textLength: text.length,
     hasGeminiKey: !!settings.geminiApiKey,
     hasDeepseekKey: !!settings.deepseekKey
   });
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:639',message:'extractKnowledgeFromText entry',data:{textLength:text.length,activeProvider:settings.activeProvider,hasGeminiKey:!!settings.geminiApiKey,hasDeepseekKey:!!settings.deepseekKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
+  
   if (settings.activeProvider === 'GEMINI') {
     // Use API key from settings only (no process.env in browser)
     const apiKey = settings.geminiApiKey;
-    console.log('[extractKnowledgeFromText] Gemini API key check', { hasApiKey: !!apiKey });
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:650',message:'Gemini API key check for knowledge',data:{hasApiKey:!!apiKey,hasSettingsKey:!!settings.geminiApiKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
+    console.log('[extractKnowledgeFromTextSingle] Gemini API key check', { hasApiKey: !!apiKey });
     if (!apiKey) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:652',message:'Gemini API key missing for knowledge',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
-      console.error("[extractKnowledgeFromText] Gemini API key not configured");
+      console.error("[extractKnowledgeFromTextSingle] Gemini API key not configured");
       throw new Error("Gemini API Key 未配置，请在设置页面配置");
     }
     const ai = new GoogleGenAI({ apiKey });
     try {
       const model = settings.geminiModel || 'gemini-3-pro-preview';
       const prompt = createKnowledgeExtractionPrompt(text);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:658',message:'Calling Gemini API for knowledge',data:{model,promptLength:prompt.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       const response = await withTimeout(
         ai.models.generateContent({
         model,
@@ -930,39 +926,24 @@ export async function extractKnowledgeFromText(
         EXTRACTION_TIMEOUT,
         `Gemini API 调用超时（${EXTRACTION_TIMEOUT / 1000}秒）`
       );
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:740',message:'Gemini knowledge response received',data:{hasText:!!response.text,textLength:response.text?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       const results = JSON.parse(response.text || '[]');
-      console.log('[extractKnowledgeFromText] Gemini knowledge results parsed', { resultsCount: results?.length || 0 });
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:687',message:'Parsed knowledge results',data:{resultsCount:results?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
+      console.log('[extractKnowledgeFromTextSingle] Gemini knowledge results parsed', { resultsCount: results?.length || 0 });
       return results;
     } catch (e) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:689',message:'Gemini knowledge extraction failed',data:{error: e instanceof Error ? e.message : String(e),errorName: e instanceof Error ? e.name : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-      console.error("[extractKnowledgeFromText] Gemini knowledge extraction failed:", e);
+      console.error("[extractKnowledgeFromTextSingle] Gemini knowledge extraction failed:", e);
       throw e;
     }
   } else {
     // DeepSeek path
     try {
       if (!settings.deepseekKey) {
-        console.error("[extractKnowledgeFromText] DeepSeek API key not configured");
+        console.error("[extractKnowledgeFromTextSingle] DeepSeek API key not configured");
         throw new Error("DeepSeek API Key 未配置，请在设置页面配置");
       }
       const prompt = createKnowledgeExtractionPrompt(text);
-      console.log('[extractKnowledgeFromText] Calling DeepSeek for knowledge', { promptLength: prompt.length });
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:699',message:'Calling DeepSeek for knowledge',data:{promptLength:prompt.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
+      console.log('[extractKnowledgeFromTextSingle] Calling DeepSeek for knowledge', { promptLength: prompt.length });
       const responseText = await callDeepSeekForExtraction(settings, prompt);
-      console.log('[extractKnowledgeFromText] DeepSeek knowledge response received', { textLength: responseText?.length || 0 });
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:700',message:'DeepSeek knowledge response received',data:{textLength:responseText?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
+      console.log('[extractKnowledgeFromTextSingle] DeepSeek knowledge response received', { textLength: responseText?.length || 0 });
       const results = parseDeepSeekJSON(responseText);
       console.log('[extractKnowledgeFromText] DeepSeek knowledge results parsed', { resultsCount: results?.length || 0 });
       // Map to knowledge format
@@ -974,8 +955,79 @@ export async function extractKnowledgeFromText(
         summary: item.summary || item.content?.slice(0, 100) || ''
       }));
     } catch (e) {
-      console.error("[extractKnowledgeFromText] DeepSeek knowledge extraction failed:", e);
+      console.error("[extractKnowledgeFromTextSingle] DeepSeek knowledge extraction failed:", e);
       throw e;
     }
   }
+}
+
+/**
+ * Extract knowledge items from text with chunking support
+ */
+export async function extractKnowledgeFromText(
+  text: string,
+  settings: AppSettings
+): Promise<Array<{
+  title: string;
+  content: string;
+  type: KnowledgeType;
+  tags: string[];
+  summary: string;
+}>> {
+  const model = settings.activeProvider === 'GEMINI'
+    ? (settings.geminiModel || 'gemini-3-pro-preview')
+    : (settings.deepseekModel || 'deepseek-chat');
+  
+  console.log('[extractKnowledgeFromText] Starting', {
+    provider: settings.activeProvider,
+    textLength: text.length,
+    hasGeminiKey: !!settings.geminiApiKey,
+    hasDeepseekKey: !!settings.deepseekKey
+  });
+  
+  // Check if chunking is needed
+  if (!shouldChunk(text, model)) {
+    // Process as single chunk
+    return await extractKnowledgeFromTextSingle(text, settings);
+  }
+  
+  // Need chunking - split text intelligently
+  const contextLimit = getModelContextLimit(model);
+  const chunks = chunkText(text, contextLimit);
+  
+  console.log(`[extractKnowledgeFromText] 文档超长，将分为 ${chunks.length} 块处理`, {
+    totalLength: text.length,
+    chunkCount: chunks.length,
+    avgChunkSize: Math.round(text.length / chunks.length),
+    modelContextLimit: contextLimit
+  });
+  
+  const allResults: any[] = [];
+  
+  // Process chunks sequentially (to avoid API rate limits)
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    console.log(`[extractKnowledgeFromText] 处理第 ${i + 1}/${chunks.length} 块`, {
+      chunkIndex: chunk.chunkIndex,
+      chunkLength: chunk.text.length,
+      progress: `${Math.round(((i + 1) / chunks.length) * 100)}%`
+    });
+    
+    try {
+      const chunkResults = await extractKnowledgeFromTextSingle(chunk.text, settings);
+      allResults.push(chunkResults);
+    } catch (error) {
+      console.error(`[extractKnowledgeFromText] 第 ${i + 1} 块处理失败:`, error);
+      // Continue processing other chunks, don't abort entire process
+    }
+  }
+  
+  // Merge results and remove duplicates
+  const merged = mergeExtractionResults(allResults);
+  console.log(`[extractKnowledgeFromText] 分块处理完成`, {
+    totalChunks: chunks.length,
+    mergedResults: merged.length
+  });
+  
+  return merged;
 }

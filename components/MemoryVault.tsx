@@ -1,6 +1,6 @@
 
-import React, { useState } from 'react';
-import { Memory, MemoryCategory, MemoryStatus } from '../types';
+import React, { useState, useMemo, useCallback } from 'react';
+import { Memory, MemoryCategory, MemoryStatus, MemoryLayer } from '../types';
 import { CATEGORY_METADATA, LAYER_METADATA } from '../constants';
 
 interface MemoryVaultProps {
@@ -15,33 +15,41 @@ const MemoryVault: React.FC<MemoryVaultProps> = ({ memories, onUpdate, onDelete 
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isSecondConfirm, setIsSecondConfirm] = useState(false);
 
-  const filteredMemories = (memories || []).filter(m => 
-    (filter === 'ALL' || m.category === filter) &&
-    (m.content && m.content.toLowerCase().includes(search.toLowerCase()))
-  );
+  // Memoize filtered memories to avoid recalculation on every render
+  const filteredMemories = useMemo(() => {
+    const searchLower = search.toLowerCase();
+    return (memories || []).filter(m => 
+      (filter === 'ALL' || m.category === filter) &&
+      (m.content && m.content.toLowerCase().includes(searchLower))
+    );
+  }, [memories, filter, search]);
 
-  const initiateDelete = (id: string) => {
+  const initiateDelete = useCallback((id: string) => {
     setDeletingId(id);
     setIsSecondConfirm(false);
-  };
+  }, []);
 
-  const handleFinalDelete = () => {
+  const handleFinalDelete = useCallback(() => {
     if (deletingId) {
       onDelete(deletingId);
       setDeletingId(null);
       setIsSecondConfirm(false);
     }
-  };
+  }, [deletingId, onDelete]);
 
   // Safely get category metadata
-  const getCategoryMeta = (cat: MemoryCategory) => {
+  const getCategoryMeta = useCallback((cat: MemoryCategory) => {
     return CATEGORY_METADATA[cat] || CATEGORY_METADATA[MemoryCategory.GOAL];
-  };
+  }, []);
 
-  // Safely get layer metadata
-  const getLayerMeta = (layer: any) => {
-    return LAYER_METADATA[layer] || { label: 'L?', stability: 'Unknown', description: 'Invalid data' };
-  };
+  // Safely get layer metadata - improved type safety
+  const getLayerMeta = useCallback((layer: MemoryLayer | number) => {
+    const layerKey = typeof layer === 'number' ? layer as MemoryLayer : layer;
+    if (layerKey in LAYER_METADATA) {
+      return LAYER_METADATA[layerKey as MemoryLayer];
+    }
+    return { label: 'L?', stability: 'Unknown', description: 'Invalid data' };
+  }, []);
 
   return (
     <div className="flex-1 p-8 overflow-y-auto bg-black/40 min-h-0 relative">
@@ -106,7 +114,7 @@ const MemoryVault: React.FC<MemoryVaultProps> = ({ memories, onUpdate, onDelete 
           <select 
             className="bg-white/5 border border-white/10 rounded-xl py-2 px-4 text-sm focus:outline-none text-gray-300"
             value={filter}
-            onChange={(e) => setFilter(e.target.value as any)}
+            onChange={(e) => setFilter(e.target.value as MemoryCategory | 'ALL')}
           >
             <option value="ALL">所有分类</option>
             {Object.values(MemoryCategory).map(cat => (
@@ -197,4 +205,4 @@ const MemoryVault: React.FC<MemoryVaultProps> = ({ memories, onUpdate, onDelete 
   );
 };
 
-export default MemoryVault;
+export default React.memo(MemoryVault);

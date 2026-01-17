@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, Suspense, lazy } from 'react';
 import { 
   Memory, MemoryCategory, MemoryLayer, MemoryStatus, 
   InsightProposal, EvolutionRecord, AppSettings, ChatMode,
@@ -7,18 +7,19 @@ import {
   ThinkingSession, ThinkingNode
 } from './types';
 import Sidebar from './components/Sidebar';
-import MemoryVault from './components/MemoryVault';
-import InsightQueue from './components/InsightQueue';
-import IntentCenter from './components/IntentCenter';
-import EvolutionTimeline from './components/EvolutionTimeline';
-import ChatInterface from './components/ChatInterface';
-import ThinkingInterface from './components/ThinkingInterface';
-import ImportHub from './components/ImportHub';
-import ExportCenter from './components/ExportCenter';
-import SettingsCenter from './components/SettingsCenter';
-import KnowledgeBase from './components/KnowledgeBase';
-import UploadHistory from './components/UploadHistory';
-import SessionArchive from './components/SessionArchive';
+// Lazy load components for code splitting and better performance
+const MemoryVault = lazy(() => import('./components/MemoryVault'));
+const InsightQueue = lazy(() => import('./components/InsightQueue'));
+const IntentCenter = lazy(() => import('./components/IntentCenter'));
+const EvolutionTimeline = lazy(() => import('./components/EvolutionTimeline'));
+const ChatInterface = lazy(() => import('./components/ChatInterface'));
+const ThinkingInterface = lazy(() => import('./components/ThinkingInterface'));
+const ImportHub = lazy(() => import('./components/ImportHub'));
+const ExportCenter = lazy(() => import('./components/ExportCenter'));
+const SettingsCenter = lazy(() => import('./components/SettingsCenter'));
+const KnowledgeBase = lazy(() => import('./components/KnowledgeBase'));
+const UploadHistory = lazy(() => import('./components/UploadHistory'));
+const SessionArchive = lazy(() => import('./components/SessionArchive'));
 import { extractInsightsFromChat, extractKnowledgeFromText } from './geminiService';
 import { findSimilarMemories, calculateQualityScore, calculateMergedConfidence } from './memoryUtils';
 import { calculateContentHash, retrieveRelevantKnowledge, formatKnowledgeContext } from './knowledgeUtils';
@@ -57,6 +58,38 @@ const safeLocalStorageSet = (key: string, value: string): boolean => {
   }
 };
 
+// Debounce function for localStorage writes
+function debounce<T extends (...args: any[]) => void>(
+  func: T,
+  wait: number
+): T & { cancel: () => void } {
+  let timeout: NodeJS.Timeout | null = null;
+  
+  const debounced = ((...args: Parameters<T>) => {
+    if (timeout !== null) {
+      clearTimeout(timeout);
+    }
+    timeout = setTimeout(() => {
+      func(...args);
+      timeout = null;
+    }, wait);
+  }) as T & { cancel: () => void };
+  
+  debounced.cancel = () => {
+    if (timeout !== null) {
+      clearTimeout(timeout);
+      timeout = null;
+    }
+  };
+  
+  return debounced;
+}
+
+// Create debounced localStorage save function (500ms delay)
+const debouncedLocalStorageSave = debounce((key: string, value: string) => {
+  safeLocalStorageSet(key, value);
+}, 500);
+
 // Helper function to extract relevant evidence from conversation history
 const extractEvidenceContext = (
   content: string,
@@ -85,6 +118,16 @@ const extractEvidenceContext = (
   return relevantMessages;
 };
 
+// Loading component for lazy-loaded components
+const ComponentLoader: React.FC = () => (
+  <div className="flex-1 flex items-center justify-center bg-black/40">
+    <div className="text-center">
+      <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mx-auto mb-4"></div>
+      <p className="text-gray-400 text-sm">加载中...</p>
+    </div>
+  </div>
+);
+
 const STORAGE_KEYS = {
   MEMORIES: 'pe_memories',
   HISTORY: 'pe_history',
@@ -110,7 +153,7 @@ const App: React.FC = () => {
   const [proposals, setProposals] = useState<InsightProposal[]>(() => {
     const saved = safeJSONParse<InsightProposal[]>(localStorage.getItem(STORAGE_KEYS.PROPOSALS), []);
     // Ensure old data has new fields, including summary
-    return saved.map((p: any) => {
+    return saved.map((p) => {
       // Auto-generate summary if missing (for backward compatibility)
       const summary = p.summary || 
                      p.reasoning || 
@@ -172,30 +215,38 @@ const App: React.FC = () => {
     safeJSONParse(localStorage.getItem(STORAGE_KEYS.SESSIONS), [])
   );
 
-  // Auto-save logic with safe storage
+  // Auto-save logic with debounced localStorage writes for better performance
   useEffect(() => { 
-    safeLocalStorageSet(STORAGE_KEYS.MEMORIES, JSON.stringify(memories)); 
+    debouncedLocalStorageSave(STORAGE_KEYS.MEMORIES, JSON.stringify(memories));
+    return () => debouncedLocalStorageSave.cancel();
   }, [memories]);
   useEffect(() => { 
-    safeLocalStorageSet(STORAGE_KEYS.HISTORY, JSON.stringify(history)); 
+    debouncedLocalStorageSave(STORAGE_KEYS.HISTORY, JSON.stringify(history));
+    return () => debouncedLocalStorageSave.cancel();
   }, [history]);
   useEffect(() => { 
-    safeLocalStorageSet(STORAGE_KEYS.PROPOSALS, JSON.stringify(proposals)); 
+    debouncedLocalStorageSave(STORAGE_KEYS.PROPOSALS, JSON.stringify(proposals));
+    return () => debouncedLocalStorageSave.cancel();
   }, [proposals]);
   useEffect(() => { 
-    safeLocalStorageSet(STORAGE_KEYS.SETTINGS, JSON.stringify(settings)); 
+    // Settings should save immediately (important configuration)
+    safeLocalStorageSet(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
   }, [settings]);
   useEffect(() => { 
-    safeLocalStorageSet(STORAGE_KEYS.MESSAGES, JSON.stringify(chatMessages)); 
+    debouncedLocalStorageSave(STORAGE_KEYS.MESSAGES, JSON.stringify(chatMessages));
+    return () => debouncedLocalStorageSave.cancel();
   }, [chatMessages]);
   useEffect(() => { 
-    safeLocalStorageSet(STORAGE_KEYS.KNOWLEDGE, JSON.stringify(knowledgeItems)); 
+    debouncedLocalStorageSave(STORAGE_KEYS.KNOWLEDGE, JSON.stringify(knowledgeItems));
+    return () => debouncedLocalStorageSave.cancel();
   }, [knowledgeItems]);
   useEffect(() => { 
-    safeLocalStorageSet(STORAGE_KEYS.UPLOADS, JSON.stringify(uploadRecords)); 
+    debouncedLocalStorageSave(STORAGE_KEYS.UPLOADS, JSON.stringify(uploadRecords));
+    return () => debouncedLocalStorageSave.cancel();
   }, [uploadRecords]);
   useEffect(() => { 
-    safeLocalStorageSet(STORAGE_KEYS.SESSIONS, JSON.stringify(sessions)); 
+    debouncedLocalStorageSave(STORAGE_KEYS.SESSIONS, JSON.stringify(sessions));
+    return () => debouncedLocalStorageSave.cancel();
   }, [sessions]);
 
   const handleClearAllData = useCallback(() => {
@@ -317,25 +368,14 @@ const App: React.FC = () => {
   }, []);
 
   const handleChatComplete = async (hist: { role: string; content: string }[]) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:307',message:'handleChatComplete called',data:{histLength:hist.length,extractionInProgress:extractionInProgressRef.current,isExtracting:isExtractingInsights,activeProvider:settings.activeProvider,hasGeminiKey:!!settings.geminiApiKey,hasDeepseekKey:!!settings.deepseekKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-    
     // Prevent concurrent extractions
     if (extractionInProgressRef.current || isExtractingInsights) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:310',message:'Extraction blocked by race condition',data:{extractionInProgress:extractionInProgressRef.current,isExtracting:isExtractingInsights},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       console.warn('Extraction already in progress, skipping...');
       return;
     }
     
     extractionInProgressRef.current = true;
     setIsExtractingInsights(true);
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:315',message:'Starting extraction',data:{activeProvider:settings.activeProvider,geminiModel:settings.geminiModel,deepseekModel:settings.deepseekModel},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     
     try {
       console.log('[handleChatComplete] Starting extraction', {
@@ -346,16 +386,9 @@ const App: React.FC = () => {
       const insights = await extractInsightsFromChat(hist, settings);
       console.log('[handleChatComplete] Extraction completed', { insightsCount: insights?.length || 0 });
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:318',message:'extractInsightsFromChat returned',data:{insightsCount:insights?.length||0,insights:insights?.slice(0,2)||[]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:319',message:'Checking insights result',data:{hasInsights:!!insights,insightsLength:insights?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
-      
       if (insights && insights.length > 0) {
         // Pre-filtering mechanism
-        const filteredInsights = insights.filter((insight: any) => {
+        const filteredInsights = insights.filter((insight) => {
           // 1. Confidence threshold filtering
           const confidence = insight.confidence ?? 0.7;
           if (settings.qualityFilterEnabled && confidence < settings.minConfidenceThreshold) {
@@ -438,7 +471,7 @@ const App: React.FC = () => {
         });
         
         // Create proposals with all quality metrics
-        const props: InsightProposal[] = filteredInsights.map((i: any) => {
+        const props: InsightProposal[] = filteredInsights.map((i) => {
           const confidence = i.confidence ?? 0.7;
           const evidenceStrength = i.evidenceStrength ?? 0.6;
           const qualityScore = calculateQualityScore({
@@ -513,25 +546,25 @@ const App: React.FC = () => {
         }
       }
     } catch (e) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:478',message:'Harvesting failed with error',data:{error: e instanceof Error ? e.message : String(e),errorStack: e instanceof Error ? e.stack : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       console.error("[handleChatComplete] Harvesting failed:", e);
       // Show error to user (could add a toast notification here)
       alert(`认知收割失败：${e instanceof Error ? e.message : '未知错误'}。请检查 API 配置或网络连接。`);
     } finally {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:480',message:'Extraction cleanup',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       setIsExtractingInsights(false);
       extractionInProgressRef.current = false;
     }
   };
 
-  const pendingCount = proposals.filter(p => p.status === 'PENDING').length;
-  const processingUploadsCount = uploadRecords.filter(u => 
-    u.status === 'PENDING' && u.processingState
-  ).length;
+  // Memoize computed counts to avoid recalculation on every render
+  const pendingCount = useMemo(
+    () => proposals.filter(p => p.status === 'PENDING').length,
+    [proposals]
+  );
+  
+  const processingUploadsCount = useMemo(
+    () => uploadRecords.filter(u => u.status === 'PENDING' && u.processingState).length,
+    [uploadRecords]
+  );
 
   return (
     <div className="flex h-screen w-full bg-[#050505] text-gray-200 overflow-hidden font-sans antialiased">
@@ -544,33 +577,40 @@ const App: React.FC = () => {
       
       <main className="flex-1 flex flex-col overflow-hidden min-h-0 relative">
         <div className={`flex-1 flex flex-col min-h-0 ${activeTab === 'chat' ? '' : 'hidden'}`}>
-          <ChatInterface 
-            memories={memories}
-            knowledgeItems={knowledgeItems}
-            messages={chatMessages}
-            setMessages={setChatMessages}
-            input={chatInput}
-            setInput={setChatInput}
-            onChatComplete={handleChatComplete}
-            isExtracting={isExtractingInsights}
-            mode={chatMode}
-            onModeToggle={setChatMode}
-            settings={settings}
-          />
+          <Suspense fallback={<ComponentLoader />}>
+            <ChatInterface 
+              memories={memories}
+              knowledgeItems={knowledgeItems}
+              messages={chatMessages}
+              setMessages={setChatMessages}
+              input={chatInput}
+              setInput={setChatInput}
+              onChatComplete={handleChatComplete}
+              isExtracting={isExtractingInsights}
+              mode={chatMode}
+              onModeToggle={setChatMode}
+              settings={settings}
+            />
+          </Suspense>
         </div>
 
         {activeTab === 'vault' && (
-          <MemoryVault memories={memories} onUpdate={handleUpdateMemory} onDelete={handleDeleteMemory} />
+          <Suspense fallback={<ComponentLoader />}>
+            <MemoryVault memories={memories} onUpdate={handleUpdateMemory} onDelete={handleDeleteMemory} />
+          </Suspense>
         )}
         {activeTab === 'queue' && (
-          <InsightQueue 
+          <Suspense fallback={<ComponentLoader />}>
+            <InsightQueue 
             proposals={proposals} 
             onAccept={handleAcceptProposal} 
             onReject={(id) => setProposals(prev => prev.map(p => p.id === id ? { ...p, status: 'REJECTED' } : p))} 
           />
+          </Suspense>
         )}
         {activeTab === 'import' && (
-          <ImportHub 
+          <Suspense fallback={<ComponentLoader />}>
+            <ImportHub 
             settings={settings}
             existingHashes={new Set(uploadRecords.map(u => u.hash))}
             uploadRecords={uploadRecords}
@@ -622,9 +662,11 @@ const App: React.FC = () => {
               // Force re-render to update processing state
             }}
           />
+          </Suspense>
         )}
         {activeTab === 'knowledge' && (
-          <KnowledgeBase
+          <Suspense fallback={<ComponentLoader />}>
+            <KnowledgeBase
             knowledgeItems={knowledgeItems}
             onUpdate={(id, updates) => {
               setKnowledgeItems(prev => prev.map(k => k.id === id ? { ...k, ...updates, updatedAt: new Date().toISOString() } : k));
@@ -633,20 +675,24 @@ const App: React.FC = () => {
               setKnowledgeItems(prev => prev.filter(k => k.id !== id));
             }}
             onArchive={(id) => {
-              setKnowledgeItems(prev => prev.map(k => k.id === id ? { ...k, status: 'ARCHIVED', updatedAt: new Date().toISOString() } : k));
+              setKnowledgeItems(prev => prev.map(k => k.id === id ? { ...k,               status: 'ARCHIVED', updatedAt: new Date().toISOString() } : k));
             }}
           />
+          </Suspense>
         )}
         {activeTab === 'uploads' && (
-          <UploadHistory
+          <Suspense fallback={<ComponentLoader />}>
+            <UploadHistory
             uploadRecords={uploadRecords}
             onDelete={(id) => {
               setUploadRecords(prev => prev.filter(u => u.id !== id));
             }}
           />
+          </Suspense>
         )}
         {activeTab === 'sessions' && (
-          <SessionArchive
+          <Suspense fallback={<ComponentLoader />}>
+            <SessionArchive
             sessions={sessions}
             onDelete={(id) => {
               setSessions(prev => prev.filter(s => s.id !== id));
@@ -657,9 +703,11 @@ const App: React.FC = () => {
               setActiveTab('chat');
             }}
           />
+          </Suspense>
         )}
         {activeTab === 'intents' && (
-          <IntentCenter onAddIntent={(memo) => {
+          <Suspense fallback={<ComponentLoader />}>
+            <IntentCenter onAddIntent={(memo) => {
             const m: Memory = {
               id: crypto.randomUUID(),
               content: memo.content || '',
@@ -676,12 +724,16 @@ const App: React.FC = () => {
             };
             handleAddMemory(m);
           }} />
+          </Suspense>
         )}
         {activeTab === 'evolution' && (
-          <EvolutionTimeline records={history} />
+          <Suspense fallback={<ComponentLoader />}>
+            <EvolutionTimeline records={history} />
+          </Suspense>
         )}
         {activeTab === 'export' && (
-          <ExportCenter 
+          <Suspense fallback={<ComponentLoader />}>
+            <ExportCenter 
             memories={memories}
             knowledge={knowledgeItems}
             sessions={sessions}
@@ -689,13 +741,16 @@ const App: React.FC = () => {
             proposals={proposals}
             history={history}
           />
+          </Suspense>
         )}
         {activeTab === 'settings' && (
-          <SettingsCenter 
+          <Suspense fallback={<ComponentLoader />}>
+            <SettingsCenter 
             settings={settings} 
             onUpdate={(u) => setSettings(s => ({ ...s, ...u }))} 
             onClearData={handleClearAllData} 
           />
+          </Suspense>
         )}
       </main>
     </div>

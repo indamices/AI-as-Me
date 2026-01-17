@@ -157,3 +157,26 @@ export interface ConversationSession {
 
 // Extraction Mode
 export type ExtractionMode = 'PERSONA' | 'KNOWLEDGE' | 'MIXED';
+
+// Extraction result interfaces
+export interface ExtractedMemory {
+  content: string;
+  category: MemoryCategory;
+  layer: MemoryLayer;
+  reasoning: string;
+  isSensitive: boolean;
+  confidence?: number;
+  evidenceStrength?: number;
+  qualityIndicators?: {
+    generalization?: number;
+    specificity?: number;
+    consistency?: number;
+  };
+}
+
+export interface ExtractedKnowledge {
+  title: string;
+  content: string;
+  type?: KnowledgeType;
+  tags?: string[];
+}

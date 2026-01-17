@@ -32,9 +32,14 @@ Object.defineProperty(window, 'localStorage', {
   value: localStorageMock,
 });
 
-// Mock crypto.subtle for content hashing tests
+// Mock crypto.subtle for content hashing tests and crypto.randomUUID
+let uuidCounter = 0;
 Object.defineProperty(global, 'crypto', {
   value: {
+    randomUUID: () => {
+      uuidCounter++;
+      return `test-uuid-${uuidCounter}-${Date.now()}`;
+    },
     subtle: {
       digest: async (algorithm: string, data: Uint8Array) => {
         // Simple mock implementation for testing

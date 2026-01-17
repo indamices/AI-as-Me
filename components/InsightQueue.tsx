@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { InsightProposal, MemoryCategory } from '../types';
 import { CATEGORY_METADATA } from '../constants';
 
@@ -10,12 +10,24 @@ interface InsightQueueProps {
 }
 
 const InsightQueue: React.FC<InsightQueueProps> = ({ proposals, onAccept, onReject }) => {
-  const pending = proposals.filter(p => p.status === 'PENDING');
-  const rejectedCount = proposals.filter(p => p.status === 'REJECTED').length;
+  // Memoize filtered proposals and counts
+  const pending = useMemo(() => 
+    proposals.filter(p => p.status === 'PENDING'), 
+    [proposals]
+  );
+  
+  const rejectedCount = useMemo(() => 
+    proposals.filter(p => p.status === 'REJECTED').length,
+    [proposals]
+  );
 
-  const getCategoryMeta = (cat: any) => {
-    return CATEGORY_METADATA[cat as MemoryCategory] || CATEGORY_METADATA[MemoryCategory.GOAL];
-  };
+  // Improved type safety for category metadata
+  const getCategoryMeta = useCallback((cat: MemoryCategory | string | undefined) => {
+    if (cat && cat in CATEGORY_METADATA) {
+      return CATEGORY_METADATA[cat as MemoryCategory];
+    }
+    return CATEGORY_METADATA[MemoryCategory.GOAL];
+  }, []);
 
   return (
     <div className="flex-1 p-8 overflow-y-auto bg-black/40">
@@ -173,4 +185,4 @@ const InsightQueue: React.FC<InsightQueueProps> = ({ proposals, onAccept, onReje
   );
 };
 
-export default InsightQueue;
+export default React.memo(InsightQueue);

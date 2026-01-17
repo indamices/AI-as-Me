@@ -4,6 +4,7 @@ import { parseImaConversationsBatch, extractKnowledgeFromText } from '../geminiS
 import { InsightProposal, AppSettings, ExtractionMode, KnowledgeItem, Memory, ConversationSession, UploadRecord, EvolutionRecord } from '../types';
 import { calculateQualityScore, findSimilarMemories } from '../memoryUtils';
 import { calculateContentHash } from '../knowledgeUtils';
+import { shouldChunk, getModelContextLimit, chunkText } from '../utils/chunkingUtils';
 import DataImport from './DataImport';
 
 interface ImportHubProps {
@@ -52,6 +53,11 @@ const ImportHub: React.FC<ImportHubProps> = ({
   const [currentUploadId, setCurrentUploadId] = useState<string | null>(null);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [chunkingInfo, setChunkingInfo] = useState<{
+    totalChunks: number;
+    currentChunk: number;
+    isChunking: boolean;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -135,7 +141,7 @@ const ImportHub: React.FC<ImportHubProps> = ({
     setSyncStep(0);
     
     let contentHash: string = '';
-    let uploadRecord: any = null;
+    let uploadRecord: UploadRecord | null = null;
     
     try {
       // Check for duplicate content
@@ -208,24 +214,35 @@ const ImportHub: React.FC<ImportHubProps> = ({
         throw new Error('DeepSeek API Key 未配置，请在设置页面配置');
       }
 
+      // Check if chunking is needed and set chunking info
+      const model = settings.activeProvider === 'GEMINI'
+        ? (settings.geminiModel || 'gemini-3-pro-preview')
+        : (settings.deepseekModel || 'deepseek-chat');
+      
+      if (shouldChunk(inputText, model)) {
+        const contextLimit = getModelContextLimit(model);
+        const chunks = chunkText(inputText, contextLimit);
+        setChunkingInfo({
+          totalChunks: chunks.length,
+          currentChunk: 0,
+          isChunking: true
+        });
+        console.log(`[ImportHub] 文档较长（${inputText.length} 字符），将分为 ${chunks.length} 块处理`);
+      }
+
       console.log('[ImportHub] Starting extraction', {
         mode: extractionMode,
         provider: settings.activeProvider,
-        hasApiKey: settings.activeProvider === 'GEMINI' ? !!settings.geminiApiKey : !!settings.deepseekKey
+        hasApiKey: settings.activeProvider === 'GEMINI' ? !!settings.geminiApiKey : !!settings.deepseekKey,
+        needsChunking: !!chunkingInfo?.isChunking
       });
 
       // Extract based on mode
       if (extractionMode === 'PERSONA' || extractionMode === 'MIXED') {
         console.log('[ImportHub] Starting persona extraction...');
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:97',message:'Starting parseImaConversationsBatch',data:{extractionMode,textLength:inputText.length,activeProvider:settings?.activeProvider,hasGeminiKey:!!settings?.geminiApiKey,hasDeepseekKey:!!settings?.deepseekKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
         const results = await parseImaConversationsBatch(inputText, settings);
         console.log('[ImportHub] Persona extraction completed', { resultsCount: results?.length || 0 });
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:90',message:'parseImaConversationsBatch completed',data:{resultsCount:results?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
-        const newProposals = results.map((r: any) => {
+        const newProposals = results.map((r) => {
           const confidence = r.confidence ?? 0.7;
           const evidenceStrength = r.evidenceStrength ?? 0.6;
           const qualityScore = calculateQualityScore({
@@ -274,15 +291,9 @@ const ImportHub: React.FC<ImportHubProps> = ({
 
       if (extractionMode === 'KNOWLEDGE' || extractionMode === 'MIXED') {
         console.log('[ImportHub] Starting knowledge extraction...');
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:138',message:'Starting extractKnowledgeFromText',data:{extractionMode,textLength:inputText.length,activeProvider:settings?.activeProvider,hasGeminiKey:!!settings?.geminiApiKey,hasDeepseekKey:!!settings?.deepseekKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
         const knowledgeResults = await extractKnowledgeFromText(inputText, settings);
         console.log('[ImportHub] Knowledge extraction completed', { resultsCount: knowledgeResults?.length || 0 });
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:139',message:'extractKnowledgeFromText completed',data:{knowledgeResultsCount:knowledgeResults?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
-        const newKnowledge = knowledgeResults.map((k: any) => ({
+        const newKnowledge = knowledgeResults.map((k) => ({
           id: crypto.randomUUID(),
           title: k.title,
           content: k.content,
@@ -330,13 +341,11 @@ const ImportHub: React.FC<ImportHubProps> = ({
       setCurrentUploadId(null);
       setStartTime(null);
       setElapsedTime(0);
+      setChunkingInfo(null);
       setInputText('');
       setUploadedFilename('');
       setErrorMessage(null);
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a52ab336-3bf8-4a2f-91ab-801e07b06386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ImportHub.tsx:193',message:'Extraction failed with error',data:{error: error instanceof Error ? error.message : String(error),errorStack: error instanceof Error ? error.stack : undefined,errorName: error instanceof Error ? error.name : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       console.error('[ImportHub] Extraction failed:', error);
       const errorMsg = error instanceof Error ? error.message : '未知错误';
       const errorDetails = error instanceof Error && error.stack ? `\n详情: ${error.stack.split('\n')[0]}` : '';
@@ -552,6 +561,24 @@ const ImportHub: React.FC<ImportHubProps> = ({
                   ></div>
                 </div>
               </div>
+
+              {/* Chunking info */}
+              {chunkingInfo && chunkingInfo.isChunking && (
+                <div className="w-full max-w-lg mb-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
+                  <div className="flex items-center gap-2 mb-2">
+                    <i className="fa-solid fa-layer-group text-blue-400"></i>
+                    <span className="text-sm text-blue-400 font-bold">
+                      分块处理：第 {chunkingInfo.currentChunk}/{chunkingInfo.totalChunks} 块
+                    </span>
+                  </div>
+                  <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden">
+                    <div 
+                      className="bg-blue-500 h-full transition-all duration-300"
+                      style={{ width: `${(chunkingInfo.currentChunk / chunkingInfo.totalChunks) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Time information */}
               <div className="flex gap-8 text-sm text-gray-400 mb-6">
