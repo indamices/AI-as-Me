@@ -75,7 +75,7 @@ async function callDeepSeek(settings: AppSettings, messages: any[]) {
 }
 
 // GLM API implementation (OpenAI compatible)
-async function callGLM(settings: AppSettings, messages: any[]) {
+async function callGLM(settings: AppSettings, messages: any[], timeout: number = DEFAULT_API_TIMEOUT) {
   const response = await fetchWithTimeout("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
     method: "POST",
     headers: {
@@ -87,7 +87,7 @@ async function callGLM(settings: AppSettings, messages: any[]) {
       messages: messages,
       stream: false
     })
-  }, DEFAULT_API_TIMEOUT); // 30 seconds for chat
+  }, timeout);
   
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: "Unknown error" }));
@@ -425,7 +425,7 @@ ${history.map(h => `${h.role}: ${h.content}`).join('\n')}`;
           role: "user",
           content: glmPrompt
         }
-      ]);
+      ], EXTRACTION_TIMEOUT); // 60 seconds for extraction tasks
       console.log('[extractInsightsFromChat] GLM response received', { textLength: text?.length || 0 });
       const results = parseDeepSeekJSON(text);
       console.log('[extractInsightsFromChat] GLM results parsed', { resultsCount: results?.length || 0 });
@@ -482,6 +482,7 @@ async function parseImaConversationsBatchSingle(text: string, settings?: AppSett
       }
       
       const glmPrompt = createDeepSeekExtractionPrompt(text);
+      console.log('[parseImaConversationsBatch] Calling GLM API', { promptLength: glmPrompt.length });
       const text_result = await callGLM(settings, [
         {
           role: "system",
@@ -494,7 +495,7 @@ async function parseImaConversationsBatchSingle(text: string, settings?: AppSett
           role: "user",
           content: glmPrompt
         }
-      ]);
+      ], EXTRACTION_TIMEOUT); // 60 seconds for extraction tasks
       
       const results = parseDeepSeekJSON(text_result);
       return results.map((r: any) => ({

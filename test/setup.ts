@@ -111,7 +111,13 @@ class MockIDBRequest {
     // Auto-resolve in next tick
     setTimeout(() => {
       if (this.onsuccess) {
-        this.onsuccess.call(this, new Event('success'));
+        // Use plain object instead of Event to avoid readonly property issues
+        const successEvent: any = {
+          type: 'success',
+          target: this,
+          currentTarget: this,
+        };
+        this.onsuccess.call(this, successEvent);
       }
     }, 0);
   }
@@ -126,14 +132,24 @@ class MockIDBOpenDBRequest extends MockIDBRequest {
     // Auto-resolve upgrade
     setTimeout(() => {
       if (this.onupgradeneeded) {
-        const event = new Event('upgradeneeded') as any;
-        event.target = this;
-        event.newVersion = 1;
-        event.oldVersion = 0;
+        // Use plain object instead of Event to allow property assignment
+        const event: any = {
+          type: 'upgradeneeded',
+          target: this,
+          currentTarget: this,
+          newVersion: 1,
+          oldVersion: 0,
+        };
         this.onupgradeneeded.call(this, event);
       }
       if (this.onsuccess) {
-        this.onsuccess.call(this, new Event('success'));
+        // Use plain object for success event too
+        const successEvent: any = {
+          type: 'success',
+          target: this,
+          currentTarget: this,
+        };
+        this.onsuccess.call(this, successEvent);
       }
     }, 0);
   }
