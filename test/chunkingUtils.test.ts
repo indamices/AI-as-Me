@@ -25,10 +25,24 @@ describe('chunkingUtils', () => {
       expect(getModelContextLimit('deepseek-chat')).toBe(25000);
     });
 
+    it('should return correct limit for glm-4.7', () => {
+      expect(getModelContextLimit('glm-4.7')).toBe(200000);
+    });
+
+    it('should return correct limit for glm-4', () => {
+      expect(getModelContextLimit('glm-4')).toBe(200000);
+    });
+
+    it('should return correct limit for glm-3', () => {
+      expect(getModelContextLimit('glm-3')).toBe(128000);
+    });
+
     it('should match partial model names', () => {
       expect(getModelContextLimit('gemini-3-pro-test')).toBe(400000);
       expect(getModelContextLimit('gemini-3-flash-beta')).toBe(400000);
       expect(getModelContextLimit('deepseek-reasoner')).toBe(25000);
+      expect(getModelContextLimit('glm-4-test')).toBe(200000);
+      expect(getModelContextLimit('glm-3-beta')).toBe(128000);
     });
 
     it('should return default limit for unknown models', () => {
@@ -63,6 +77,16 @@ describe('chunkingUtils', () => {
     it('should return false for text within deepseek limit', () => {
       const mediumText = 'Text. '.repeat(1000); // ~6K chars
       expect(shouldChunk(mediumText, 'deepseek-chat')).toBe(false);
+    });
+
+    it('should return true for text exceeding glm-4.7 limit', () => {
+      const longText = 'Text. '.repeat(60000); // ~360K chars, exceeds 200K limit
+      expect(shouldChunk(longText, 'glm-4.7')).toBe(true);
+    });
+
+    it('should return false for text within glm-4.7 limit', () => {
+      const mediumText = 'Text. '.repeat(10000); // ~60K chars, within 200K limit
+      expect(shouldChunk(mediumText, 'glm-4.7')).toBe(false);
     });
 
     it('should handle empty string', () => {

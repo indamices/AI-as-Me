@@ -210,6 +210,9 @@ const ImportHub: React.FC<ImportHubProps> = ({
       if (settings.activeProvider === 'GEMINI' && !settings.geminiApiKey) {
         throw new Error('Gemini API Key 未配置，请在设置页面配置');
       }
+      if (settings.activeProvider === 'GLM' && !settings.glmApiKey) {
+        throw new Error('GLM API Key 未配置，请在设置页面配置');
+      }
       if (settings.activeProvider === 'DEEPSEEK' && !settings.deepseekKey) {
         throw new Error('DeepSeek API Key 未配置，请在设置页面配置');
       }
@@ -217,6 +220,8 @@ const ImportHub: React.FC<ImportHubProps> = ({
       // Check if chunking is needed and set chunking info
       const model = settings.activeProvider === 'GEMINI'
         ? (settings.geminiModel || 'gemini-3-pro-preview')
+        : settings.activeProvider === 'GLM'
+        ? (settings.glmModel || 'glm-4.7')
         : (settings.deepseekModel || 'deepseek-chat');
       
       if (shouldChunk(inputText, model)) {
@@ -233,7 +238,11 @@ const ImportHub: React.FC<ImportHubProps> = ({
       console.log('[ImportHub] Starting extraction', {
         mode: extractionMode,
         provider: settings.activeProvider,
-        hasApiKey: settings.activeProvider === 'GEMINI' ? !!settings.geminiApiKey : !!settings.deepseekKey,
+        hasApiKey: settings.activeProvider === 'GEMINI' 
+          ? !!settings.geminiApiKey 
+          : settings.activeProvider === 'GLM'
+          ? !!settings.glmApiKey
+          : !!settings.deepseekKey,
         needsChunking: !!chunkingInfo?.isChunking
       });
 

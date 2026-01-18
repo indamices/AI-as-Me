@@ -630,6 +630,7 @@ export const parseImaConversationsBatch = async (text: string, settings?: AppSet
     provider: activeProvider,
     textLength: text.length,
     hasGeminiKey: !!settings?.geminiApiKey,
+    hasGlmKey: !!settings?.glmApiKey,
     hasDeepseekKey: !!settings?.deepseekKey
   });
   
@@ -1046,6 +1047,7 @@ async function extractKnowledgeFromTextSingle(
     provider: settings.activeProvider,
     textLength: text.length,
     hasGeminiKey: !!settings.geminiApiKey,
+    hasGlmKey: !!settings.glmApiKey,
     hasDeepseekKey: !!settings.deepseekKey
   });
   
@@ -1099,6 +1101,43 @@ async function extractKnowledgeFromTextSingle(
       console.error("[extractKnowledgeFromTextSingle] Gemini knowledge extraction failed:", e);
       throw e;
     }
+  } else if (settings.activeProvider === 'GLM') {
+    // GLM path
+    try {
+      if (!settings.glmApiKey) {
+        console.error("[extractKnowledgeFromTextSingle] GLM API key not configured");
+        throw new Error("GLM API Key 未配置，请在设置页面配置");
+      }
+      const prompt = createKnowledgeExtractionPrompt(text);
+      console.log('[extractKnowledgeFromTextSingle] Calling GLM for knowledge', { promptLength: prompt.length });
+      const text_result = await callGLM(settings, [
+        {
+          role: "system",
+          content: `你是一个专业的知识管理助手。你的任务是分析内容并提取知识。
+你必须严格按照要求的 JSON 格式输出，不要添加任何解释性文字。
+如果无法提取有效知识，返回空数组 []。
+确保输出的 JSON 格式完全正确，可以直接被解析。`
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ], EXTRACTION_TIMEOUT); // 60 seconds for extraction tasks
+      console.log('[extractKnowledgeFromTextSingle] GLM knowledge response received', { textLength: text_result?.length || 0 });
+      const results = parseDeepSeekJSON(text_result);
+      console.log('[extractKnowledgeFromTextSingle] GLM knowledge results parsed', { resultsCount: results?.length || 0 });
+      // Map to knowledge format
+      return results.map((item: any) => ({
+        title: item.title || item.content?.slice(0, 50) || '未命名知识',
+        content: item.content || item.summary || '',
+        type: (item.type || 'NOTE') as KnowledgeType,
+        tags: item.tags || [],
+        summary: item.summary || item.content?.slice(0, 100) || ''
+      }));
+    } catch (e) {
+      console.error("[extractKnowledgeFromTextSingle] GLM knowledge extraction failed:", e);
+      throw e;
+    }
   } else {
     // DeepSeek path
     try {
@@ -1142,12 +1181,15 @@ export async function extractKnowledgeFromText(
 }>> {
   const model = settings.activeProvider === 'GEMINI'
     ? (settings.geminiModel || 'gemini-3-pro-preview')
+    : settings.activeProvider === 'GLM'
+    ? (settings.glmModel || 'glm-4.7')
     : (settings.deepseekModel || 'deepseek-chat');
   
   console.log('[extractKnowledgeFromText] Starting', {
     provider: settings.activeProvider,
     textLength: text.length,
     hasGeminiKey: !!settings.geminiApiKey,
+    hasGlmKey: !!settings.glmApiKey,
     hasDeepseekKey: !!settings.deepseekKey
   });
   

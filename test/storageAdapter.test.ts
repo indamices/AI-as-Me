@@ -34,8 +34,20 @@ describe('LocalStorageAdapter', () => {
       // Mock localStorage to throw QuotaExceededError
       const originalSetItem = localStorage.setItem;
       localStorage.setItem = vi.fn(() => {
-        const error = new DOMException('QuotaExceededError');
-        error.name = 'QuotaExceededError';
+        // Use plain object instead of DOMException to allow property assignment
+        const error: any = Object.create(DOMException.prototype);
+        Object.defineProperty(error, 'name', {
+          value: 'QuotaExceededError',
+          writable: false,
+          enumerable: false,
+          configurable: true
+        });
+        Object.defineProperty(error, 'message', {
+          value: 'QuotaExceededError',
+          writable: false,
+          enumerable: false,
+          configurable: true
+        });
         throw error;
       });
 
