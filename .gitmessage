@@ -1,0 +1,24 @@
+# Commit Message Template
+# Use English only to avoid encoding issues
+
+# <type>(<scope>): <subject>
+#
+# <body>
+#
+# <footer>
+
+# Type must be one of:
+# - feat:     A new feature
+# - fix:      A bug fix
+# - docs:     Documentation only changes
+# - style:    Changes that do not affect the meaning of the code
+# - refactor: A code change that neither fixes a bug nor adds a feature
+# - perf:     A code change that improves performance
+# - test:     Adding missing tests or correcting existing tests
+# - chore:    Changes to the build process or auxiliary tools
+# - ci:       Changes to CI configuration files and scripts
+
+# Examples:
+# feat(import): add GLM model support for chunking
+# fix(api): increase timeout for extraction tasks
+# test(storage): add comprehensive tests for storage utilities

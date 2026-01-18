@@ -141,6 +141,8 @@ git push origin --delete <branch-name>
 
 ### 3.2 提交信息规范
 
+**重要：所有提交信息必须使用英文，避免编码问题和跨平台兼容性问题。**
+
 遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范：
 
 ```
